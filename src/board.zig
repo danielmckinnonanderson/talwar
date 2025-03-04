@@ -64,7 +64,7 @@ const PlacementError = error{ PositionOccupied };
 const MovementCalculationError = error{ NoPieceToMove, IncorrectPieceType };
 
 /// Place a piece at an empty space.
-/// If the space is occupied, raises a `BoardError.PlacementPositionOccupied`.
+/// If the space is occupied, raises `PlacementError.PositionOccupied`.
 pub fn placePiece(
     board: *Board,
     piece: Piece,
@@ -134,13 +134,10 @@ pub fn getPawnMoves(position: Board.Position, board: *const Board) MovementCalcu
     var moves: u64 = 0;
 
     if ((occupied & pos_bit) == 0) {
-        // TODO - Return an error here since the position is unoccupied
         return MovementCalculationError.NoPieceToMove;
     }
 
     if ((occupied & pos_bit) != 0 and ((board.pawns & pos_bit) == 0)) {
-        // TODO - Return an error here since the position is occupied
-        //        by a piece which is not a pawn
         return MovementCalculationError.IncorrectPieceType;
     }
 
@@ -214,30 +211,101 @@ pub fn getPawnMoves(position: Board.Position, board: *const Board) MovementCalcu
     return moves;
 }
 
-pub fn knightMovements(position: Board.Position, bit_boards: *const Board) u64 {
-    _ = bit_boards;
+pub fn getRookMoves(position: Board.Position, board: *const Board) MovementCalculationError!u64 {
+    const occupied = getOccupied(board);
+    const pos_bit: u64 = @as(u64, 1) << position;
 
     var moves: u64 = 0;
-    const board: u64 = @as(u64, 1) << position;
-    std.debug.print("Board: {}\n", .{ board });
 
-    // Right 1, Up 2
-    moves |= (board << 17) & ~Board.FILE_H;
-    // Right 2, Up 1
-    moves |= (board << 10) & ~Board.FILE_G & ~Board.FILE_H;
-    // Right 2, Down 1
-    moves |= (board >>  6) & ~Board.FILE_G & ~Board.FILE_H;
-    // Right 1, Down 2
-    moves |= (board >> 15) & ~Board.FILE_H;
+    if ((occupied & pos_bit) == 0) {
+        return MovementCalculationError.NoPieceToMove;
+    }
 
-    // Left 1, Down 2
-    moves |= (board >> 17) & ~Board.FILE_A;
-    // Left 2, Down 1
-    moves |= (board >> 10) & ~Board.FILE_A & ~Board.FILE_B;
-    // Left 2, Up 1
-    moves |= (board <<  6) & ~Board.FILE_A & ~Board.FILE_B;
-    // Left 1, Up 2
-    moves |= (board << 15) & ~Board.FILE_A;
+    if ((occupied & pos_bit) != 0 and ((board.rooks & pos_bit) == 0)) {
+        return MovementCalculationError.IncorrectPieceType;
+    }
+
+    moves = 0;
+
+    const color: PieceColor = if ((board.white & pos_bit) != 0)
+        PieceColor.white
+    else
+        PieceColor.black;
+    
+    const friendly_pieces = if (color == .white) board.white else board.black;
+    const file = position % 8;
+
+    // Calculate moves in each direction until we hit a piece or the edge of the board
+    
+    // Up direction
+    var current_pos: u6 = position;
+    while (current_pos < 56) {
+        current_pos += 8;
+        const current_bit = @as(u64, 1) << current_pos;
+
+        // Hit a friendly piece or a king
+        if (((friendly_pieces & current_bit) != 0) or (occupied & current_bit & board.kings) != 0) {
+            break;
+        }
+        
+        moves |= current_bit;
+
+        // Hit an enemy piece
+        if ((occupied & current_bit) != 0) {
+            break;
+        }
+    }
+    
+    // Down direction
+    current_pos = position;
+    while (current_pos >= 8) {
+        current_pos -= 8;
+        const current_bit = @as(u64, 1) << current_pos;
+        
+        if ((friendly_pieces & current_bit) != 0) {
+            break;
+        }
+        
+        moves |= current_bit;
+        
+        if ((occupied & current_bit) != 0) {
+            break;
+        }
+    }
+    
+    // Right direction
+    current_pos = position;
+    while (file < 7 and current_pos % 8 < 7) {
+        current_pos += 1;
+        const current_bit = @as(u64, 1) << current_pos;
+        
+        if ((friendly_pieces & current_bit) != 0) {
+            break;
+        }
+        
+        moves |= current_bit;
+        
+        if ((occupied & current_bit) != 0) {
+            break;
+        }
+    }
+    
+    // Left direction
+    current_pos = position;
+    while (file > 0 and current_pos % 8 > 0) {
+        current_pos -= 1;
+        const current_bit = @as(u64, 1) << current_pos;
+        
+        if ((friendly_pieces & current_bit) != 0) {
+            break;
+        }
+        
+        moves |= current_bit;
+        
+        if ((occupied & current_bit) != 0) {
+            break;
+        }
+    }
 
     return moves;
 }
@@ -252,45 +320,6 @@ test "initializing an empty board results in all bits set to zero" {
     try std.testing.expectEqual(@as(u64, 0), b.rooks);
     try std.testing.expectEqual(@as(u64, 0), b.queens);
     try std.testing.expectEqual(@as(u64, 0), b.kings);
-}
-
-test "Knight movement from center position (d4)" {
-    return error.SkipZigTest;
-
-    // var board = Board.init();
-    // 
-    // // The center position - d4 is at index 27
-    // const center_pos: Board.Position = 27;
-    // const moves = knightMovements(center_pos, &board);
-    // 
-    // // Expected positions for a knight at d4
-    // // A knight in the center can move to all 8 possible positions
-    // const expected_positions = [8]Board.Position{
-    //     10, 12,     // b2, d2 (2 ranks down)
-    //     17, 25,     // b3, f3 (1 rank down)
-    //     33, 41,     // b5, f5 (1 rank up)
-    //     42, 44      // c6, e6 (2 ranks up)
-    // };
-    // 
-    // // Validate that all 8 expected positions are set in the moves bitboard
-    // var count: u8 = 0;
-    // for (expected_positions) |pos| {
-    //     const pos_bit = @as(u64, 1) << pos;
-    //     try testing.expect((moves & pos_bit) == pos_bit);
-    //     count += 1;
-    // }
-    // 
-    // // Validate that exactly 8 positions are set (no more, no less)
-    // // Count bits set to 1 in the moves bitboard
-    // var total_bits: u8 = 0;
-    // var temp_moves = moves;
-    // while (temp_moves != 0) {
-    //     total_bits += @as(u8, 1);
-    //     temp_moves &= temp_moves - 1; // Clear the least significant bit set
-    // }
-    // 
-    // try testing.expectEqual(count, total_bits);
-    // try testing.expectEqual(@as(u8, 8), total_bits);
 }
 
 test "`getOccupied` produces the union of bitboards `black` and `white`" {
@@ -441,6 +470,35 @@ test "Pawns cannot move beyond the boundary of the board" {
     const black_moves = try getPawnMoves(black_pos, &board);
 
     try std.testing.expectEqual(0, black_moves);
+}
+
+test "Rooks can move across rank and file" {
+    var board: Board = Board.init();
+
+    const pos: Board.Position = 36;
+    board.rooks |= @as(u64, 1) << pos;
+    board.white |= @as(u64, 1) << pos;
+    const moves = try getRookMoves(pos, &board);
+
+    try std.testing.expectEqual(1157443723186933776, moves);
+}
+
+test "Rooks which are boxed in have no valid moves" {
+    var board: Board = Board.init();
+
+    const pos: Board.Position = 7;
+    board.rooks |= @as(u64, 1) << pos;
+    board.black |= @as(u64, 1) << pos;
+
+    board.queens |= @as(u64, 1) << 6;
+    board.black  |= @as(u64, 1) << 6;
+
+    // Can't capture kings
+    board.kings |= @as(u64, 1) << 15;
+    board.white |= @as(u64, 1) << 15;
+
+    const moves = try getRookMoves(pos, &board);
+    try std.testing.expectEqual(0, moves);
 }
 
 test "Placing piece on an occupied space raises an error" {
