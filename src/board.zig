@@ -211,7 +211,7 @@ pub fn getPawnMoves(position: Board.Position, board: *const Board) MovementCalcu
     return moves;
 }
 
-pub fn getRookMoves(position: Board.Position, board: *const Board) MovementCalculationError!u64 {
+pub fn getBishopMoves(position: Board.Position, board: *const Board) MovementCalculationError!u64 {
     const occupied = getOccupied(board);
     const pos_bit: u64 = @as(u64, 1) << position;
 
@@ -221,11 +221,137 @@ pub fn getRookMoves(position: Board.Position, board: *const Board) MovementCalcu
         return MovementCalculationError.NoPieceToMove;
     }
 
-    if ((occupied & pos_bit) != 0 and ((board.rooks & pos_bit) == 0)) {
-        return MovementCalculationError.IncorrectPieceType;
+    const color: PieceColor = if ((board.white & pos_bit) != 0)
+        PieceColor.white
+    else
+        PieceColor.black;
+    
+    const friendly_pieces = if (color == .white) board.white else board.black;
+
+    // Calculate moves in each direction until we hit a piece or the edge of the board
+    
+    // Top-left direction
+    var current_pos = position;
+
+    if (pos_bit & Board.RANK_8 != 0 or pos_bit & Board.FILE_A != 0) {
+        // can't go any further in this direction
+    } else {
+        while (current_pos <= 62) {
+            current_pos += 7;
+            const current_bit = @as(u64, 1) << @intCast(current_pos);
+
+            // Hit a friendly piece or a king
+            if (((friendly_pieces & current_bit) != 0) or (occupied & current_bit & board.kings) != 0) {
+                break;
+            }
+            
+            moves |= current_bit;
+
+            // Hit an enemy piece
+            if ((occupied & current_bit) != 0) {
+                break;
+            }
+
+            // Prevent integer overflow
+            if ((current_bit & Board.RANK_8) != 0 or (current_bit & Board.FILE_A) != 0) {
+                break;
+            }
+        }
+    }
+    
+    // Top-right direction
+    current_pos = position;
+
+    if (pos_bit & Board.RANK_8 != 0 or pos_bit & Board.FILE_H != 0) {
+        // can't go any further
+    } else {
+        while (current_pos <= 63) {
+            current_pos += 9;
+            const current_bit = @as(u64, 1) << @intCast(current_pos);
+            
+            if (((friendly_pieces & current_bit) != 0) or (occupied & current_bit & board.kings) != 0) {
+                break;
+            }
+            
+            moves |= current_bit;
+            
+            if ((occupied & current_bit) != 0) {
+                break;
+            }
+
+            // Prevent integer overflow
+            if ((current_bit & Board.RANK_8) != 0 or (current_bit & Board.FILE_H) != 0) {
+                break;
+            }
+        }
     }
 
-    moves = 0;
+    // Bottom-right direction
+    current_pos = position;
+
+    if (pos_bit & Board.RANK_1 != 0 or pos_bit & Board.FILE_H != 0) {
+        // can't go any further
+    } else {
+        while (current_pos >= 1) {
+            current_pos -= 7;
+            const current_bit = @as(u64, 1) << @intCast(current_pos);
+            
+            if (((friendly_pieces & current_bit) != 0) or (occupied & current_bit & board.kings) != 0) {
+                break;
+            }
+            
+            moves |= current_bit;
+            
+            if ((occupied & current_bit) != 0) {
+                break;
+            }
+
+            // Prevent integer underflow
+            if ((current_bit & Board.RANK_1) != 0 or (current_bit & Board.FILE_H) != 0) {
+                break;
+            }
+        }
+    }
+    
+    // Bottom-left direction
+    current_pos = position;
+        // can't go any further
+    if (pos_bit & Board.RANK_1 != 0 or pos_bit & Board.FILE_A != 0) {
+
+    } else {
+        while (current_pos >= 0) {
+            current_pos -= 9;
+            const current_bit = @as(u64, 1) << @intCast(current_pos);
+            
+            if (((friendly_pieces & current_bit) != 0) or (occupied & current_bit & board.kings) != 0) {
+                break;
+            }
+            
+            moves |= current_bit;
+            
+            if ((occupied & current_bit) != 0) {
+                break;
+            }
+
+            // Prevent integer underflow
+            if ((current_bit & Board.RANK_1) != 0 or (current_bit & Board.FILE_A) != 0) {
+                break;
+            }
+        }
+    }
+
+    return moves;
+}
+
+pub fn getRookMoves(position: Board.Position, board: *const Board) MovementCalculationError!u64 {
+    const occupied = getOccupied(board);
+    const pos_bit: u64 = @as(u64, 1) << position;
+
+    var moves: u64 = 0;
+
+    if ((occupied & pos_bit) == 0) {
+        return MovementCalculationError.NoPieceToMove;
+    }
 
     const color: PieceColor = if ((board.white & pos_bit) != 0)
         PieceColor.white
@@ -261,8 +387,8 @@ pub fn getRookMoves(position: Board.Position, board: *const Board) MovementCalcu
     while (current_pos >= 8) {
         current_pos -= 8;
         const current_bit = @as(u64, 1) << current_pos;
-        
-        if ((friendly_pieces & current_bit) != 0) {
+
+        if (((friendly_pieces & current_bit) != 0) or (occupied & current_bit & board.kings) != 0) {
             break;
         }
         
@@ -279,7 +405,7 @@ pub fn getRookMoves(position: Board.Position, board: *const Board) MovementCalcu
         current_pos += 1;
         const current_bit = @as(u64, 1) << current_pos;
         
-        if ((friendly_pieces & current_bit) != 0) {
+        if (((friendly_pieces & current_bit) != 0) or (occupied & current_bit & board.kings) != 0) {
             break;
         }
         
@@ -296,7 +422,7 @@ pub fn getRookMoves(position: Board.Position, board: *const Board) MovementCalcu
         current_pos -= 1;
         const current_bit = @as(u64, 1) << current_pos;
         
-        if ((friendly_pieces & current_bit) != 0) {
+        if (((friendly_pieces & current_bit) != 0) or (occupied & current_bit & board.kings) != 0) {
             break;
         }
         
@@ -308,6 +434,13 @@ pub fn getRookMoves(position: Board.Position, board: *const Board) MovementCalcu
     }
 
     return moves;
+}
+
+pub fn getQueenMoves(position: u6, board: *const Board) MovementCalculationError!u64 {
+    const diagonals     = try getBishopMoves(position, board);
+    const rank_and_file = try getRookMoves(position, board);
+
+    return diagonals | rank_and_file;
 }
 
 test "initializing an empty board results in all bits set to zero" {
@@ -498,6 +631,109 @@ test "Rooks which are boxed in have no valid moves" {
     board.white |= @as(u64, 1) << 15;
 
     const moves = try getRookMoves(pos, &board);
+    try std.testing.expectEqual(0, moves);
+}
+
+test "Bishops can move diagonally across the board" {
+    var board: Board = Board.init();
+
+    const pos: Board.Position = 3;
+    board.bishops |= @as(u64, 1) << pos;
+    board.black   |= @as(u64, 1) << pos;
+
+    const moves = try getBishopMoves(pos, &board);
+    try std.testing.expectEqual(550848566272, moves);
+}
+
+test "Bishops with pieces at each corner can't move" {
+    var board: Board = Board.init();
+
+    const pos: Board.Position = 20;
+    board.bishops |= @as(u64, 1) << pos;
+    board.white   |= @as(u64, 1) << pos;
+
+    board.kings |= @as(u64, 1) << 27;
+    board.black |= @as(u64, 1) << 27;
+
+    board.kings |= @as(u64, 1) << 29;
+    board.black |= @as(u64, 1) << 29;
+
+    board.knights |= @as(u64, 1) << 13;
+    board.white   |= @as(u64, 1) << 13;
+
+    board.queens |= @as(u64, 1) << 11;
+    board.white  |= @as(u64, 1) << 11;
+
+    const moves = try getBishopMoves(pos, &board);
+    try std.testing.expectEqual(0, moves);
+}
+
+test "Bishops can move along their path until they encounter a capture" {
+    var board: Board = Board.init();
+
+    const pos: Board.Position = 20;
+    board.bishops |= @as(u64, 1) << pos;
+    board.white   |= @as(u64, 1) << pos;
+
+    board.rooks |= @as(u64, 1) << 41;
+    board.black |= @as(u64, 1) << 41;
+
+    board.kings |= @as(u64, 1) << 29;
+    board.black |= @as(u64, 1) << 29;
+
+    board.knights |= @as(u64, 1) << 13;
+    board.white   |= @as(u64, 1) << 13;
+
+    board.queens |= @as(u64, 1) << 11;
+    board.white  |= @as(u64, 1) << 11;
+
+    const moves = try getBishopMoves(pos, &board);
+    try std.testing.expectEqual(2216337342464, moves);
+}
+
+test "Queen can move across rank and file as well as diagonally" {
+    var board: Board = Board.init();
+
+    const pos: Board.Position = 28;
+    board.queens |= @as(u64, 1) << pos;
+    board.black  |= @as(u64, 1) << pos;
+
+    const moves = getQueenMoves(pos, &board);
+    try std.testing.expectEqual(1266167048752878738, moves);
+}
+
+test "Queen boxed in on all sides cannot move" {
+    var board: Board = Board.init();
+    const pos: Board.Position = 28;
+
+    board.queens |= @as(u64, 1) << pos;
+    board.black  |= @as(u64, 1) << pos;
+
+    board.queens |= @as(u64, 1) << 29;
+    board.black  |= @as(u64, 1) << 29;
+
+    board.queens |= @as(u64, 1) << 37;
+    board.black  |= @as(u64, 1) << 37;
+
+    board.queens |= @as(u64, 1) << 36;
+    board.black  |= @as(u64, 1) << 36;
+
+    board.kings  |= @as(u64, 1) << 35;
+    board.white  |= @as(u64, 1) << 35;
+
+    board.kings  |= @as(u64, 1) << 27;
+    board.white  |= @as(u64, 1) << 27;
+
+    board.rooks  |= @as(u64, 1) << 19;
+    board.black  |= @as(u64, 1) << 19;
+
+    board.rooks  |= @as(u64, 1) << 20;
+    board.black  |= @as(u64, 1) << 20;
+
+    board.knights |= @as(u64, 1) << 21;
+    board.black   |= @as(u64, 1) << 21;
+
+    const moves = getQueenMoves(pos, &board);
     try std.testing.expectEqual(0, moves);
 }
 
