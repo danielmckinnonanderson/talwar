@@ -61,6 +61,7 @@ pub const Board = struct {
 };
 
 const PlacementError = error{ PositionOccupied };
+const MovementCalculationError = error{ NoPieceToMove, IncorrectPieceType };
 
 /// Place a piece at an empty space.
 /// If the space is occupied, raises a `BoardError.PlacementPositionOccupied`.
@@ -126,7 +127,7 @@ pub fn getUnoccupied(board: *const Board) u64 {
 // TODO - Account for moving into / out of check here.
 // TODO - Account for moves which require "move history", like en passant and castling.
 
-pub fn getPawnMoves(position: Board.Position, board: *const Board) anyerror!u64 {
+pub fn getPawnMoves(position: Board.Position, board: *const Board) MovementCalculationError!u64 {
     const occupied = getOccupied(board);
     const pos_bit: u64 = @as(u64, 1) << position;
 
@@ -134,11 +135,13 @@ pub fn getPawnMoves(position: Board.Position, board: *const Board) anyerror!u64 
 
     if ((occupied & pos_bit) == 0) {
         // TODO - Return an error here since the position is unoccupied
+        return MovementCalculationError.NoPieceToMove;
     }
 
-    if ((occupied & pos_bit) == 1 and ((board.pawns & pos_bit) == 0)) {
+    if ((occupied & pos_bit) != 0 and ((board.pawns & pos_bit) == 0)) {
         // TODO - Return an error here since the position is occupied
         //        by a piece which is not a pawn
+        return MovementCalculationError.IncorrectPieceType;
     }
 
     const color: PieceColor = if ((board.white & pos_bit) != 0)
@@ -147,11 +150,11 @@ pub fn getPawnMoves(position: Board.Position, board: *const Board) anyerror!u64 
         PieceColor.black;
 
     const at_final_rank: bool = if (color == .white)
-        position < 56
+        pos_bit & Board.RANK_8 != 0
     else
-        position > 7;
+        pos_bit & Board.RANK_1 != 0;
 
-    if (!at_final_rank) {
+    if (at_final_rank) {
         // If we can't move forward there are no legal moves for us to make.
         // We're done here.
         return 0;
@@ -190,32 +193,22 @@ pub fn getPawnMoves(position: Board.Position, board: *const Board) anyerror!u64 
         }
     }
 
-    // TODO - This block in particular could be refactored as mentioned above
-    if (color == .white) {
-        // One rank ahead and one file to the right
-        const diag_right_pos = @as(u64, 1) << (position + 9);
-        const diag_left_pos  = @as(u64, 1) << (position + 7);
+    const diag_right_pos = if (color == .white)
+        @as(u64, 1) << position + 9
+    else @as(u64, 1) << position - 7;
 
-        // If the space is occupied by a non-king piece of opposite color
-        // it is capturable and thus a legal move
-        if (board.black & (~board.kings) & diag_right_pos != 0) {
-            moves |= diag_right_pos;
-        }
-        if (board.black & (~board.kings) & diag_left_pos != 0) {
-            moves |= diag_left_pos;
-        }
-    } else {
-        // One rank ahead and one file to the right of the forward direction
-        // (so down and to the left from the perspective of white)
-        const diag_right_pos = @as(u64, 1) << (position - 7);
-        const diag_left_pos  = @as(u64, 1) << (position - 9);
+    const diag_left_pos = if (color == .white)
+        @as(u64, 1) << position + 7
+    else @as(u64, 1) << position - 9;
 
-        if (board.white & (~board.kings) & diag_right_pos != 0) {
-            moves |= diag_right_pos;
-        }
-        if (board.white & (~board.kings) & diag_left_pos != 0) {
-            moves |= diag_left_pos;
-        }
+    // If the space is occupied by a non-king piece of opposite color
+    // it is capturable and thus a legal move
+    const opposite_color = if (color == .white) board.black else board.white;
+    if (opposite_color & ~board.kings & diag_right_pos != 0) {
+        moves |= diag_right_pos;
+    }
+    if (opposite_color & ~board.kings & diag_left_pos != 0) {
+        moves |= diag_left_pos;
     }
 
     return moves;
@@ -326,8 +319,8 @@ test "Pawns can move forward if they are on the board" {
     var board: Board = Board.init();
 
     const black_pos: Board.Position = 61;
-    board.black |= black_pos;
-    board.pawns |= black_pos;
+    board.black |= @as(u64, 1) << black_pos;
+    board.pawns |= @as(u64, 1) << black_pos;
     const black_moves = try getPawnMoves(black_pos, &board);
     try std.testing.expectEqual(9007199254740992, black_moves);
 
@@ -347,8 +340,8 @@ test "Pawns can move two spaces forward if they are in their starting rank" {
     var board: Board = Board.init();
 
     const black_pos: Board.Position = 54;
-    board.black |= black_pos;
-    board.pawns |= black_pos;
+    board.black |= @as(u64, 1) << black_pos;
+    board.pawns |= @as(u64, 1) << black_pos;
     const black_moves = try getPawnMoves(black_pos, &board);
     try std.testing.expectEqual(70643622084608, black_moves);
 
@@ -410,6 +403,44 @@ test "Pawns cannot capture friendly pieces and cannot move into occupied squares
     const moves = try getPawnMoves(pawn_pos, &board);
     // No legal moves in this board state
     try std.testing.expectEqual(0, moves);
+}
+
+test "Pawns cannot capture kings" {
+    var board: Board = Board.init();
+
+    const pawn_pos: Board.Position = 32;
+    board.black |= @as(u64, 1) << pawn_pos;
+    board.pawns |= @as(u64, 1) << pawn_pos;
+
+    const white_k1_pos: Board.Position = 25;
+    board.white |= @as(u64, 1) << white_k1_pos;
+    board.kings |= @as(u64, 1) << white_k1_pos;
+    const white_k2_pos: Board.Position = 23;
+    board.white |= @as(u64, 1) << white_k2_pos;
+    board.kings |= @as(u64, 1) << white_k2_pos;
+
+    const moves = try getPawnMoves(pawn_pos, &board);
+
+    // We expect the pawn to only be able to move forward one space,
+    // since the diagonals are occupied by kings which cannot be captured.
+    try std.testing.expectEqual(16777216, moves);
+}
+
+test "Pawns cannot move beyond the boundary of the board" {
+    var board: Board = Board.init();
+
+    const white_pos: Board.Position = 62;
+    board.pawns |= @as(u64, 1) << white_pos;
+    board.white |= @as(u64, 1) << white_pos;
+    const white_moves = try getPawnMoves(white_pos, &board);
+    try std.testing.expectEqual(0, white_moves);
+
+    const black_pos: Board.Position = 1;
+    board.pawns |= @as(u64, 1) << black_pos;
+    board.black |= @as(u64, 1) << black_pos;
+    const black_moves = try getPawnMoves(black_pos, &board);
+
+    try std.testing.expectEqual(0, black_moves);
 }
 
 test "Placing piece on an occupied space raises an error" {
