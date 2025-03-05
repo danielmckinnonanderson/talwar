@@ -45,7 +45,7 @@ pub const Board = struct {
     queens: u64,
     kings: u64,
 
-    pub fn init() Board {
+    pub fn empty() Board {
         return Board {
             .white   = 0,
             .black   = 0,
@@ -54,8 +54,83 @@ pub const Board = struct {
             .knights = 0,
             .rooks   = 0,
             .queens  = 0,
-            .kings   = 0
+            .kings   = 0,
         };
+    }
+
+    pub fn init() Board {
+        return Board {
+            .white   =                65535,
+            .black   = 18446462598732840960,
+            .pawns   =    71776119061282560,
+            .bishops =  2594073385365405732,
+            .knights =  4755801206503243842,
+            .rooks   =  9295429630892703873,
+            .queens  =   576460752303423496,
+            .kings   =  1152921504606846992,
+        };
+    }
+
+    pub fn format(
+        self: Board,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+
+        try writer.writeAll("  +-----------------+\n");
+
+        var rank: usize = 7;
+
+        while (true) : (rank -%= 1) {
+            try writer.print("{d} | ", .{rank + 1});
+
+            var file: usize = 0;
+            while (file < 8) : (file += 1) {
+                const position = (rank * 8) + file;
+                const bit_position: u64 = @as(u64, 1) << @intCast(position);
+                
+                const is_white = (self.white & bit_position) != 0;
+                const is_black = (self.black & bit_position) != 0;
+                
+                if (!is_white and !is_black) {
+                    try writer.writeAll(". ");
+                    continue;
+                }
+                
+                var piece_char: u8 = '.';
+                
+                if (self.pawns & bit_position != 0) {
+                    piece_char = 'P';
+                } else if (self.knights & bit_position != 0) {
+                    piece_char = 'N';
+                } else if (self.bishops & bit_position != 0) {
+                    piece_char = 'B';
+                } else if (self.rooks & bit_position != 0) {
+                    piece_char = 'R';
+                } else if (self.queens & bit_position != 0) {
+                    piece_char = 'Q';
+                } else if (self.kings & bit_position != 0) {
+                    piece_char = 'K';
+                }
+                
+                // Use lowercase for black pieces
+                if (is_black) {
+                    piece_char = std.ascii.toLower(piece_char);
+                }
+                
+                try writer.print("{c} ", .{piece_char});
+            }
+
+            try writer.writeAll("|\n");
+            
+            if (rank == 0) break;
+        }
+
+        try writer.writeAll("  +-----------------+\n");
+        try writer.writeAll("    A B C D E F G H  \n");
     }
 };
 
@@ -77,31 +152,19 @@ pub fn placePiece(
         return PlacementError.PositionOccupied;
     }
 
-    switch (piece) {
-        .pawn => {
-            board.pawns |= pos_bit;
-        },
-        .knight => {
-            board.knights |= pos_bit;
-        },
-        .bishop => {
-            board.bishops |= pos_bit;
-        },
-        .rook => {
-            board.rooks |= pos_bit;
-        },
-        .queen => {
-            board.queens |= pos_bit;
-        },
-        .king => {
-            board.kings |= pos_bit;
-        },
-    }
-
     if (color == .black) {
         board.black |= pos_bit;
     } else {
         board.white |= pos_bit;
+    }
+
+    switch (piece) {
+        .pawn   => board.pawns   |= pos_bit,
+        .knight => board.knights |= pos_bit,
+        .bishop => board.bishops |= pos_bit,
+        .rook   => board.rooks   |= pos_bit,
+        .queen  => board.queens  |= pos_bit,
+        .king   => board.kings   |= pos_bit,
     }
 }
 
@@ -125,6 +188,8 @@ pub fn getUnoccupied(board: *const Board) u64 {
 // 
 // TODO - Account for moving into / out of check here.
 // TODO - Account for moves which require "move history", like en passant and castling.
+// TODO - Account for "pinned" pieces, ie pieces that actually cannot move because their
+//        moving would leave their king in check.
 
 pub fn getPawnMoves(position: Board.Position, board: *const Board) MovementCalculationError!u64 {
     const occupied = getOccupied(board);
@@ -509,8 +574,25 @@ pub fn getQueenMoves(position: u6, board: *const Board) MovementCalculationError
     return diagonals | rank_and_file;
 }
 
+// TODO - Account for castling and check
+pub fn getKingMoves(position: u6, board: *const Board) MovementCalculationError!u64 {
+    const pos_bit = @as(u64, 1) << position;
+
+    var moves: u64 = 0;
+    moves = 0;
+
+    const color = if ((board.white & pos_bit) != 0)
+        PieceColor.white
+    else PieceColor.black;
+
+    const enemies = if (color == .white) board.black else board.white;
+    _ = enemies;
+
+    return moves;
+}
+
 test "initializing an empty board results in all bits set to zero" {
-    const b = Board.init();
+    const b = Board.empty();
     try std.testing.expectEqual(@as(u64, 0), b.white);
     try std.testing.expectEqual(@as(u64, 0), b.black);
     try std.testing.expectEqual(@as(u64, 0), b.pawns);
@@ -522,7 +604,7 @@ test "initializing an empty board results in all bits set to zero" {
 }
 
 test "`getOccupied` produces the union of bitboards `black` and `white`" {
-    var board: Board = Board.init();
+    var board: Board = Board.empty();
     board.white = 0x0F0F0F0F0F0F0F0F;
     board.black = 0xF0F0F0F0F0F0F0F0;
     const actual = getOccupied(&board);
@@ -531,7 +613,7 @@ test "`getOccupied` produces the union of bitboards `black` and `white`" {
 }
 
 test "`getUnoccupied` produces the negation of the union of bitboards `black` and `white`" {
-    var board: Board = Board.init();
+    var board: Board = Board.empty();
     board.white = 0x0F0F0F0F0F0F0F0F;
     board.black = 0xF0F0F0F0F0F0F0F0;
     const actual = getUnoccupied(&board);
@@ -544,7 +626,7 @@ test "Pawns can move forward if they are on the board" {
     // and which have no other pieces around them.
     // Both should produce exactly one legal move, advancing a single space forward.
 
-    var board: Board = Board.init();
+    var board: Board = Board.empty();
 
     const black_pos: Board.Position = 61;
     board.black |= @as(u64, 1) << black_pos;
@@ -565,7 +647,7 @@ test "Pawns can move two spaces forward if they are in their starting rank" {
     // We expect each move list to produce two moves for each - one rank forward
     // and two ranks forward.
 
-    var board: Board = Board.init();
+    var board: Board = Board.empty();
 
     const black_pos: Board.Position = 54;
     board.black |= @as(u64, 1) << black_pos;
@@ -581,7 +663,7 @@ test "Pawns can move two spaces forward if they are in their starting rank" {
 }
 
 test "Pawns can capture if enemy pieces occupy forward-diagonal spaces" {
-    var blk_board: Board = Board.init();
+    var blk_board: Board = Board.empty();
 
     // Put a black pawn at G7
     const black_pos: Board.Position = 54;
@@ -609,7 +691,7 @@ test "Pawns cannot capture friendly pieces and cannot move into occupied squares
     // Put friendly pieces in capturable locations to verify
     // that we cannot erroneously capture pieces of our own team
 
-    var board: Board = Board.init();
+    var board: Board = Board.empty();
 
     const pawn_pos: Board.Position = 13;
     board.white |= @as(u64, 1) << pawn_pos;
@@ -634,7 +716,7 @@ test "Pawns cannot capture friendly pieces and cannot move into occupied squares
 }
 
 test "Pawns cannot capture kings" {
-    var board: Board = Board.init();
+    var board: Board = Board.empty();
 
     const pawn_pos: Board.Position = 32;
     board.black |= @as(u64, 1) << pawn_pos;
@@ -655,7 +737,7 @@ test "Pawns cannot capture kings" {
 }
 
 test "Pawns cannot move beyond the boundary of the board" {
-    var board: Board = Board.init();
+    var board: Board = Board.empty();
 
     const white_pos: Board.Position = 62;
     board.pawns |= @as(u64, 1) << white_pos;
@@ -671,7 +753,7 @@ test "Pawns cannot move beyond the boundary of the board" {
 }
 
 test "Knights can be moved in a 2 over 1 pattern of rank & file, over other pieces" {
-    var board: Board = Board.init();
+    var board: Board = Board.empty();
 
     const pos: Board.Position = 36;
 
@@ -704,7 +786,7 @@ test "Knights can be moved in a 2 over 1 pattern of rank & file, over other piec
 
 
 test "Knights which have all destinations unreachable cannot move" {
-    var board: Board = Board.init();
+    var board: Board = Board.empty();
 
     const pos: Board.Position = 39;
 
@@ -730,7 +812,7 @@ test "Knights which have all destinations unreachable cannot move" {
 
 
 test "Rooks can move across rank and file" {
-    var board: Board = Board.init();
+    var board: Board = Board.empty();
 
     const pos: Board.Position = 36;
     board.rooks |= @as(u64, 1) << pos;
@@ -741,7 +823,7 @@ test "Rooks can move across rank and file" {
 }
 
 test "Rooks which are boxed in have no valid moves" {
-    var board: Board = Board.init();
+    var board: Board = Board.empty();
 
     const pos: Board.Position = 7;
     board.rooks |= @as(u64, 1) << pos;
@@ -759,7 +841,7 @@ test "Rooks which are boxed in have no valid moves" {
 }
 
 test "Bishops can move diagonally across the board" {
-    var board: Board = Board.init();
+    var board: Board = Board.empty();
 
     const pos: Board.Position = 3;
     board.bishops |= @as(u64, 1) << pos;
@@ -770,7 +852,7 @@ test "Bishops can move diagonally across the board" {
 }
 
 test "Bishops with pieces at each corner can't move" {
-    var board: Board = Board.init();
+    var board: Board = Board.empty();
 
     const pos: Board.Position = 20;
     board.bishops |= @as(u64, 1) << pos;
@@ -793,7 +875,7 @@ test "Bishops with pieces at each corner can't move" {
 }
 
 test "Bishops can move along their path until they encounter a capture" {
-    var board: Board = Board.init();
+    var board: Board = Board.empty();
 
     const pos: Board.Position = 20;
     board.bishops |= @as(u64, 1) << pos;
@@ -816,7 +898,7 @@ test "Bishops can move along their path until they encounter a capture" {
 }
 
 test "Queen can move across rank and file as well as diagonally" {
-    var board: Board = Board.init();
+    var board: Board = Board.empty();
 
     const pos: Board.Position = 28;
     board.queens |= @as(u64, 1) << pos;
@@ -827,7 +909,7 @@ test "Queen can move across rank and file as well as diagonally" {
 }
 
 test "Queen boxed in on all sides cannot move" {
-    var board: Board = Board.init();
+    var board: Board = Board.empty();
     const pos: Board.Position = 28;
 
     board.queens |= @as(u64, 1) << pos;
@@ -861,8 +943,19 @@ test "Queen boxed in on all sides cannot move" {
     try std.testing.expectEqual(0, moves);
 }
 
+test "Kings can move one space at a time on an empty board with no castling privileges" {
+    var board = Board.empty();
+    const pos: Board.Position = 19;
+
+    board.black |= @as(u64, 1) << pos;
+    board.kings |= @as(u64, 1) << pos;
+
+    const moves = getKingMoves(pos, &board);
+    try std.testing.expectEqual(471079937, moves);
+}
+
 test "Placing piece on an occupied space raises an error" {
-    var board = Board.init();
+    var board = Board.empty();
     const pos: Board.Position = 42;
 
     // Make the position occupied
@@ -880,7 +973,7 @@ test "Placing piece on an occupied space raises an error" {
 }
 
 test "Placing piece on an empty space updates the bit-board representations" {
-    var board = Board.init();
+    var board = Board.empty();
     const pos: Board.Position = 42;
 
     try std.testing.expectEqual(0, board.black);
