@@ -11,7 +11,6 @@ pub const Piece = enum {
 };
 
 
-
 pub const PieceColor = enum { white, black };
 
 pub const Board = struct {
@@ -211,6 +210,73 @@ pub fn getPawnMoves(position: Board.Position, board: *const Board) MovementCalcu
     return moves;
 }
 
+pub fn getKnightMoves(position: Board.Position, board: *const Board) MovementCalculationError!u64 {
+    const pos_bit: u64 = @as(u64, 1) << position;
+    
+    const occupied = getOccupied(board);
+    if ((occupied & pos_bit) == 0) {
+        return MovementCalculationError.NoPieceToMove;
+    }
+
+    const color: PieceColor = if ((board.white & pos_bit) != 0)
+        PieceColor.white
+    else
+        PieceColor.black;
+    
+    const friendly_pieces = if (color == .white) board.white else board.black;
+    const enemy_kings = if (color == .white) (board.kings & board.black) else (board.kings & board.white);
+
+    const not_a_file  = ~Board.FILE_A;
+    const not_ab_file = ~(Board.FILE_A | Board.FILE_B);
+    const not_h_file  = ~Board.FILE_H;
+    const not_gh_file = ~(Board.FILE_G | Board.FILE_H);
+
+    var moves: u64 = 0;
+
+    // North movements (up 2, then left or right 1)
+    const n_l = (pos_bit << 15) & not_h_file;
+    if ((n_l & friendly_pieces) == 0 and (n_l & enemy_kings) == 0) {
+        moves |= n_l;
+    }
+
+    const n_r = (pos_bit << 17) & not_a_file;
+    if ((n_r & friendly_pieces) == 0 and (n_r & enemy_kings) == 0) {
+        moves |= n_r;
+    }
+
+    // South movements (down 2, then left or right 1)
+    const s_r = (pos_bit >> 15) & not_a_file;
+    if ((s_r & friendly_pieces) == 0 and (s_r & enemy_kings) == 0) {
+        moves |= s_r;
+    }
+    const s_l = (pos_bit >> 17) & not_h_file;
+    if ((s_l & friendly_pieces) == 0 and (s_l & enemy_kings) == 0) {
+        moves |= s_l;
+    }
+
+    // East movements (right 2, then up or down 1)
+    const e_n = (pos_bit << 10) & not_ab_file;
+    if ((e_n & friendly_pieces) == 0 and (e_n & enemy_kings) == 0) {
+        moves |= e_n;
+    }
+    const e_s = (pos_bit >>  6) & not_ab_file;
+    if ((e_s & friendly_pieces) == 0 and (e_s & enemy_kings) == 0) {
+        moves |= e_s;
+    }
+
+    // West movements (left 2, then up or down 1)
+    const w_n = (pos_bit <<  6) & not_gh_file;
+    if ((w_n & friendly_pieces) == 0 and (w_n & enemy_kings) == 0) {
+        moves |= w_n;
+    }
+    const w_s = (pos_bit >> 10) & not_gh_file;
+    if ((w_s & friendly_pieces) == 0 and (w_s & enemy_kings) == 0) {
+        moves |= w_s;
+    }
+
+    return moves;
+}
+
 pub fn getBishopMoves(position: Board.Position, board: *const Board) MovementCalculationError!u64 {
     const occupied = getOccupied(board);
     const pos_bit: u64 = @as(u64, 1) << position;
@@ -315,9 +381,9 @@ pub fn getBishopMoves(position: Board.Position, board: *const Board) MovementCal
     
     // Bottom-left direction
     current_pos = position;
-        // can't go any further
-    if (pos_bit & Board.RANK_1 != 0 or pos_bit & Board.FILE_A != 0) {
 
+    if (pos_bit & Board.RANK_1 != 0 or pos_bit & Board.FILE_A != 0) {
+        // can't go any further
     } else {
         while (current_pos >= 0) {
             current_pos -= 9;
@@ -601,9 +667,67 @@ test "Pawns cannot move beyond the boundary of the board" {
     board.pawns |= @as(u64, 1) << black_pos;
     board.black |= @as(u64, 1) << black_pos;
     const black_moves = try getPawnMoves(black_pos, &board);
-
     try std.testing.expectEqual(0, black_moves);
 }
+
+test "Knights can be moved in a 2 over 1 pattern of rank & file, over other pieces" {
+    var board: Board = Board.init();
+
+    const pos: Board.Position = 36;
+
+    board.knights |= @as(u64, 1) << pos;
+    board.white   |= @as(u64, 1) << pos;
+
+    // Put some pieces around the knight - These should
+    // not affect movement since knights can "jump over" pieces
+    board.black   |= @as(u64, 1) << 27;
+    board.pawns   |= @as(u64, 1) << 27;
+    board.black   |= @as(u64, 1) << 28;
+    board.rooks   |= @as(u64, 1) << 28;
+    board.black   |= @as(u64, 1) << 29;
+    board.bishops |= @as(u64, 1) << 29;
+    board.black   |= @as(u64, 1) << 35;
+    board.queens  |= @as(u64, 1) << 35;
+    board.black   |= @as(u64, 1) << 37;
+    board.queens  |= @as(u64, 1) << 37;
+    board.black   |= @as(u64, 1) << 43;
+    board.kings   |= @as(u64, 1) << 43;
+    board.white   |= @as(u64, 1) << 44;
+    board.rooks   |= @as(u64, 1) << 44;
+    board.white   |= @as(u64, 1) << 45;
+    board.rooks   |= @as(u64, 1) << 45;
+
+    const moves = try getKnightMoves(pos, &board);
+
+    try std.testing.expectEqual(11333767002587136, moves);
+}
+
+
+test "Knights which have all destinations unreachable cannot move" {
+    var board: Board = Board.init();
+
+    const pos: Board.Position = 39;
+
+    board.knights |= @as(u64, 1) << pos;
+    board.black   |= @as(u64, 1) << pos;
+
+    board.black  |= @as(u64, 1) << 54;
+    board.rooks  |= @as(u64, 1) << 54;
+
+    board.white  |= @as(u64, 1) << 45;
+    board.kings  |= @as(u64, 1) << 45;
+
+    board.white  |= @as(u64, 1) << 29;
+    board.kings  |= @as(u64, 1) << 29;
+
+    board.black  |= @as(u64, 1) << 22;
+    board.queens |= @as(u64, 1) << 22;
+
+    const moves = try getKnightMoves(pos, &board);
+
+    try std.testing.expectEqual(0, moves);
+}
+
 
 test "Rooks can move across rank and file" {
     var board: Board = Board.init();
