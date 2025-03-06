@@ -71,6 +71,8 @@ pub const Board = struct {
         };
     }
 
+    /// Implements the format interface for the board as whole, writing the
+    /// pieces / colors to a visual representation
     pub fn format(
         self: Board,
         comptime fmt: []const u8,
@@ -131,6 +133,37 @@ pub const Board = struct {
 
         try writer.writeAll("  +-----------------+\n");
         try writer.writeAll("    A B C D E F G H  \n");
+    }
+
+    /// Prints a bitboard in a chess board format with '.' for empty squares and 'x' for occupied squares
+    pub fn printBitboard(bitboard: u64) void {
+        const stdout = std.io.getStdOut().writer();
+
+        stdout.writeAll("  +-----------------+\n") catch {};
+
+        var rank: usize = 7;
+        while (true) : (rank -%= 1) {
+            stdout.print("{d} | ", .{rank + 1}) catch {};
+
+            var file: usize = 0;
+            while (file < 8) : (file += 1) {
+                const position = (rank * 8) + file;
+                const bit = @as(u64, 1) << @intCast(position);
+
+                if (bitboard & bit != 0) {
+                    stdout.writeAll("x ") catch {};
+                } else {
+                    stdout.writeAll(". ") catch {};
+                }
+            }
+
+            stdout.writeAll("|\n") catch {};
+
+            if (rank == 0) break;
+        }
+
+        stdout.writeAll("  +-----------------+\n") catch {};
+        stdout.writeAll("    A B C D E F G H  \n") catch {};
     }
 };
 
@@ -576,17 +609,36 @@ pub fn getQueenMoves(position: u6, board: *const Board) MovementCalculationError
 
 // TODO - Account for castling and check
 pub fn getKingMoves(position: u6, board: *const Board) MovementCalculationError!u64 {
-    const pos_bit = @as(u64, 1) << position;
+    const king_bitboard: u64 = @as(u64, 1) << position;
+
+    const is_white = (board.white & king_bitboard) != 0;
+
+    const friendly_pieces = if (is_white) board.white else board.black;
+
+    // Prevent wrapping around the board
+    const not_a_file = ~Board.FILE_A;
+    const not_h_file = ~Board.FILE_H;
 
     var moves: u64 = 0;
-    moves = 0;
 
-    const color = if ((board.white & pos_bit) != 0)
-        PieceColor.white
-    else PieceColor.black;
+    // North, North-East, East
+    moves |= (king_bitboard << 8);
+    moves |= (king_bitboard << 9) & not_a_file;
+    moves |= (king_bitboard << 1) & not_a_file;
 
-    const enemies = if (color == .white) board.black else board.white;
-    _ = enemies;
+    // South-East, South, South-West
+    moves |= (king_bitboard >> 7) & not_a_file;
+    moves |= (king_bitboard >> 8);
+    moves |= (king_bitboard >> 9) & not_h_file;
+
+    // West, North-West
+    moves |= (king_bitboard >> 1) & not_h_file;
+    moves |= (king_bitboard << 7) & not_h_file;
+
+    // Can't capture friends
+    moves &= ~friendly_pieces;
+    // Can't capture kings
+    moves &= ~board.kings;
 
     return moves;
 }
@@ -951,7 +1003,29 @@ test "Kings can move one space at a time on an empty board with no castling priv
     board.kings |= @as(u64, 1) << pos;
 
     const moves = getKingMoves(pos, &board);
-    try std.testing.expectEqual(471079937, moves);
+    try std.testing.expectEqual(471079936, moves);
+}
+
+test "Kings can which are boxed in by friendly pieces cannot move" {
+    var board = Board.empty();
+    const pos: Board.Position = 47;
+
+    board.white |= @as(u64, 1) << pos;
+    board.kings |= @as(u64, 1) << pos;
+
+    board.white |= @as(u64, 1) << 39;
+    board.rooks |= @as(u64, 1) << 39;
+    board.white |= @as(u64, 1) << 38;
+    board.rooks |= @as(u64, 1) << 38;
+    board.white |= @as(u64, 1) << 46;
+    board.rooks |= @as(u64, 1) << 46;
+    board.white |= @as(u64, 1) << 54;
+    board.pawns |= @as(u64, 1) << 54;
+    board.white |= @as(u64, 1) << 55;
+    board.kings |= @as(u64, 1) << 55;
+
+    const moves = getKingMoves(pos, &board);
+    try std.testing.expectEqual(0, moves);
 }
 
 test "Placing piece on an occupied space raises an error" {
