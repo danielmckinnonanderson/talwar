@@ -70,6 +70,9 @@ pub const Board = struct {
     white: u64,
     black: u64,
 
+    attacked_by_white: u64,
+    attacked_by_black: u64,
+
     pawns: u64,
     knights: u64,
     bishops: u64,
@@ -80,7 +83,9 @@ pub const Board = struct {
     pub fn empty() Board {
         return Board {
             .white   = 0,
+            .attacked_by_white = 0,
             .black   = 0,
+            .attacked_by_black = 0,
             .pawns   = 0,
             .bishops = 0,
             .knights = 0,
@@ -98,19 +103,18 @@ pub const Board = struct {
             .black   = comptime Position.intoBitboard(
                         &[_]Position{ .A7, .B7, .C7, .D7, .E7, .F7, .G7, .H7,
                                       .A8, .B8, .C8, .D8, .E8, .F8, .G8, .H8 }),
+            .attacked_by_white = comptime Position.intoBitboard(
+                        &[_]Position{ .A3, .B3, .C3, .D3, .E3, .F3, .G3, .H3 }),
+            .attacked_by_black = comptime Position.intoBitboard(
+                        &[_]Position{ .A6, .B6, .C6, .D6, .E6, .F6, .G6, .H6 }),
             .pawns   = comptime Position.intoBitboard(
                         &[_]Position{ .A2, .B2, .C2, .D2, .E2, .F2, .G2, .H2,
                                       .A7, .B7, .C7, .D7, .E7, .F7, .G7, .H7 }),
-            .bishops = comptime Position.intoBitboard(
-                        &[_]Position{ .C1, .F1, .C8, .F8 }),
-            .knights = comptime Position.intoBitboard(
-                        &[_]Position{ .B1, .G1, .B8, .G8 }),
-            .rooks   = comptime Position.intoBitboard(
-                        &[_]Position{ .A1, .H1, .A8, .H8 }),
-            .queens  = comptime Position.intoBitboard(
-                        &[_]Position{ .D1, .D8 }),
-            .kings   = comptime Position.intoBitboard(
-                        &[_]Position{ .E1, .E8 }),
+            .bishops = comptime Position.intoBitboard(&[_]Position{ .C1, .F1, .C8, .F8 }),
+            .knights = comptime Position.intoBitboard(&[_]Position{ .B1, .G1, .B8, .G8 }),
+            .rooks   = comptime Position.intoBitboard(&[_]Position{ .A1, .H1, .A8, .H8 }),
+            .queens  = comptime Position.intoBitboard(&[_]Position{ .D1, .D8 }),
+            .kings   = comptime Position.intoBitboard(&[_]Position{ .E1, .E8 }),
         };
     }
 
@@ -244,12 +248,67 @@ pub fn placePiece(
     }
 }
 
-pub fn getOccupied(board: *const Board) u64 {
+pub inline fn getOccupied(board: *const Board) u64 {
     return board.white | board.black;
 }
 
-pub fn getUnoccupied(board: *const Board) u64 {
+pub inline fn getUnoccupied(board: *const Board) u64 {
     return ~(board.white | board.black);
+}
+
+fn attackedByPawns(pawn_positions: u64, color: PieceColor) u64 {
+    var attacked_squares: u64 = 0;
+    var remaining_positions = pawn_positions;
+
+    while (remaining_positions != 0) {
+        const lsb = remaining_positions & (~remaining_positions + 1);
+        // Count trailing zeros gives us the position
+        const position = @ctz(lsb);
+        const attacks_from_position = attackedByPawn(@intCast(position), color);
+        attacked_squares |= attacks_from_position;
+
+        remaining_positions &= ~lsb;
+    }
+
+    return attacked_squares;
+}
+
+fn attackedByPawn(position: Board.PositionIndex, color: PieceColor) u64 {
+    const pos_bit = @as(u64, 1) << position;
+
+    const at_final_rank: bool = if (color == .white)
+        pos_bit & Board.RANK_8 != 0
+    else
+        pos_bit & Board.RANK_1 != 0;
+
+    if (at_final_rank) {
+        return 0;
+    }
+
+    const on_a_file = (pos_bit & Board.FILE_A) != 0;
+    const on_h_file = (pos_bit & Board.FILE_H) != 0;
+
+    var attacks: u64 = 0;
+
+    if (color == .white) {
+        if (!on_h_file) {
+            attacks |= @as(u64, 1) << (position + 9);
+        }
+
+        if (!on_a_file) {
+            attacks |= @as(u64, 1) << (position + 7);
+        }
+    } else {
+        if (!on_h_file) {
+            attacks |= @as(u64, 1) << (position - 7);
+        }
+
+        if (!on_a_file) {
+            attacks |= @as(u64, 1) << (position - 9);
+        }
+    }
+
+    return attacks;
 }
 
 // All piece movements should perform the following steps to end up
@@ -266,6 +325,7 @@ pub fn getUnoccupied(board: *const Board) u64 {
 // TODO - Account for moves which require "move history", like en passant and castling.
 // TODO - Account for "pinned" pieces, ie pieces that actually cannot move because their
 //        moving would leave their king in check.
+
 
 pub fn getPawnMoves(position: Board.PositionIndex, board: *const Board) MovementCalculationError!u64 {
     const occupied = getOccupied(board);
@@ -1115,5 +1175,20 @@ test "Using `intoBitboard` on a slice of `Position` enums is equivalent to decla
     try std.testing.expectEqual( 9295429630892703873, board.rooks);
     try std.testing.expectEqual(  576460752303423496, board.queens);
     try std.testing.expectEqual( 1152921504606846992, board.kings);
+}
+
+test "Get attacked squares for pawns produces accurate bitboard" {
+    var board = Board.empty();
+
+    const pawns = comptime Position.intoBitboard(&[_]Position{ .A2, .B2, .C3, .D4, .E4, .F3, .G2, .H2 });
+    const attacking =  comptime Position.intoBitboard(
+        &[_]Position{ .B3, .A3, .C3, .B4, .D4, .C5, .E5, .D5, .F5, .E4, .G4, .F3, .H3, .G3 });
+
+    board.pawns |= pawns;
+    board.white |= pawns;
+
+    const result = attackedByPawns(board.pawns & board.white, .white);
+
+    try std.testing.expectEqual(attacking, result);
 }
 
