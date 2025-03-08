@@ -1,8 +1,8 @@
 const std = @import("std");
-const board = @import("./board.zig");
+const bitboards = @import("./bitboards.zig");
 
 pub fn main() !void {
-    const b = board.Board.init();
+    const b = bitboards.Board.init();
     std.debug.print("{}\n", .{b});
 }
 
