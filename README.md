@@ -2,7 +2,7 @@
 
 A chess engine written in Zig.
 
-This application requires Zig `0.14.0`.
+This application requires Zig `0.13.0`.
 
 Run the app with
 ```
