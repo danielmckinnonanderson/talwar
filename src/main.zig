@@ -3,6 +3,8 @@ const bitboards = @import("bitboards.zig");
 const uci       = @import("uci.zig");
 
 pub fn main() !void {
+    std.debug.print("Talwar starting up...\n", .{});
+
     const stdin  = std.io.getStdIn().reader();
     const stdout = std.io.getStdOut().writer();
     const Interface = uci.Interface(@TypeOf(stdin), @TypeOf(stdout));

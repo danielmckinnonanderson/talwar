@@ -317,37 +317,129 @@ pub const UciCommand = enum {
 
                 return GuiToEngineCommand{ .go = payload };
 
+            } else if (mem.eql(u8, first, "stop")) {
+                return .stop;
+
+            } else if (mem.eql(u8, first, "ponderhit")) {
+                return .ponderhit;
+
             } else if (mem.eql(u8, first, "quit")) {
-                std.debug.print("Could not deserialize a {s} from input '{s}'\n", .{ @typeName(This), str });
-                unreachable;
+                return .quit;
 
             } else {
                 std.debug.print("Could not deserialize a {s} from input '{s}'\n", .{ @typeName(This), str });
                 unreachable;
-
             }
 
             unreachable;
         }
     };
 
-    pub const EngineToGuiCommandId = union(enum) {
-        name:   []const u8,
-        author: []const u8,
-    };
-
     pub const EngineToGuiCommand = union(enum) {
-        id: EngineToGuiCommandId,
+        id: union(enum) {
+            name: []const u8,
+            author: []const u8,
+        },
         uciok,
         readyok,
-        bestmove,
-
+        bestmove: struct {
+            // TODO - Type for move notation
+            move1: []const u8,
+            move2: ?[]const u8,
+        },
         // These two are unimplemented for now
         copyprotection,
         registration,
 
-        info, // tons of subcommands
-        option, // tons of subcommands
+        info: union(enum) {
+            /// Search depth in plies
+            depth: u16,
+
+            /// Selective search depth in plies.
+            /// If this command is present, a "depth" command must be present in the same payload.
+            seldepth: u16,
+
+            /// Time searched in milliseconds.
+            /// Should accompany the `pv` attribute in payload.
+            time: u32,
+
+            /// Number of nodes searched, engine should send this info regularly.
+            nodes: u32,
+
+            /// The best line found
+            pv: [][]const u8, // TODO - Type for move notation
+
+            // TODO - What the hell does this mean?
+            /// For multi-pv mode.
+            /// For the best move/pv, add "multipv 1" in the string when `pv` is sent.
+            /// In k-best mode always send all k variants in k strings together
+            multipv: u32,
+
+            score: union(enum) {
+                /// Score from engine's POV in units of centipawns.
+                cp: u32,
+
+                /// Mate in <value> moves (unit is moves, not plies).
+                /// If the engine is getting mated, uses negative values for <value>.
+                mate: i16,
+
+                // TODO - Is bool correct type for this?
+                /// If the score is just a lower bound.
+                lowerbound: bool,
+
+                // TODO - Is bool correct type for this?
+                /// If the score is just an upper bound.
+                upperbound: bool,
+            },
+
+            /// Currently searching this move.
+            currmove: []const u8, // TODO - Notation for moves
+
+            /// Currently search move number <value>, where the first move has <value> 1 (not 0).
+            currmovenumber: i32,
+
+            // TODO - What does this mean? Is "permill" per-million? Per-million what?
+            /// The hash is <value> permill full, the engine should send this info regularly.
+            hashfull: u32,
+
+            /// <value> nodes per second searched, engine should send this info regularly.
+            nps: u32, // TODO - Might need a bigger integer here
+
+            /// <value> positions were found in the endgame table databases.
+            tbhits: u32,
+
+            /// <value> positions were found in the shredder endgame databses.
+            sbhits: u32,
+
+            // TODO - How is this statistic calculated?
+            /// The CPU usage of the engine is <value> permill (per-million?)
+            cpuload: u64,
+
+            /// Any string <value> which will be displayed (by the UI?)
+            string: []const u8,
+
+            /// Move <value1> is refuted by the line <value2> - <value{i}>, where `i` can
+            /// be any number >= 1.
+            /// If there is no refutation for <value1>, the command should be sent as
+            /// `info refutation <value1>`.
+            refutation: [][]const u8, // TODO - Type for move notation
+
+            /// This is the current line the engine is calculating.
+            currline: struct {
+                /// The number of CPUs the engine is running on.
+                /// If running on 1 CPU, this parameter can be omitted.
+                cpunr: ?u8,
+
+                /// The line the engine is calculating.
+                moves: [][]const u8, // TODO - Type for move notation
+            },
+        },
+        /// Tells the GUI which parameters can be changed in the engine.
+        /// This should be sent once at engine startup after the "uci" and "id" commands
+        /// if any parameter can be changed in the engine.
+        option: union(enum) {
+            // For now, nothing is parameterized.
+        }
     };
 };
 
@@ -365,6 +457,9 @@ pub fn Interface(comptime ReaderType: type, comptime WriterType: type) type {
             };
         }
 
+        /// Check the input stream for new commands.
+        /// If no input is present, return `null`.
+        /// If an input is present, attempt to parse it and returned the parsed command, or an error.
         pub fn poll(self: *@This()) !?UciCommand.GuiToEngineCommand {
             var buf: [128]u8 = undefined;
             const input = try self.input_stream.readUntilDelimiterOrEof(&buf, '\n');
@@ -376,24 +471,130 @@ pub fn Interface(comptime ReaderType: type, comptime WriterType: type) type {
             return UciCommand.GuiToEngineCommand.fromString(&input.?);
         }
 
+        /// Send the given command to the output stream.
+        /// Return an error if the output could not be sent.
         pub fn send(self: *@This(), command: UciCommand.EngineToGuiCommand) !void {
+            std.debug.print("Sending something!\n", .{});
+
+            var bw = std.io.bufferedWriter(self.output_stream);
+            const output = bw.writer();
+
+            defer bw.flush() catch unreachable;
+
             switch (command) {
                 .id => |subcommand| {
                     switch (subcommand) {
                         .author => {
-                            try self.output_stream.print("id author Daniel\n", .{});
+                            // TODO - Externalize variable
+                            try output.print("id author Daniel\n", .{});
                         },
                         .name => {
-                            try self.output_stream.print("id name Talwar [development]\n", .{});
+                            // TODO - Externalize variable
+                            try output.print("id name Talwar [development]\n", .{});
                         },
                     }
                 },
                 .uciok => {
-                    try self.output_stream.print("uciok\n", .{});
+                    try output.print("uciok\n", .{});
                 },
-                else => {
+                .readyok => {
+                    try output.print("readyok\n", .{});
+                },
+                .bestmove => |moves| {
+                    if (moves.move2 != null) {
+                        try output.print("bestmove {s} ponder {s}\n", .{ moves.move1, moves.move2.? });
+                    } else {
+                        try output.print("bestmove {s}\n", .{ moves.move1 });
+                    }
+                },
+                .copyprotection => {
+                    // FIXME
                     unreachable;
-                }
+                },
+                .registration => {
+                    // FIXME
+                    unreachable;
+                },
+                .info => |info| {
+                    switch (info) {
+                        .depth => |plies| {
+                            _ = plies;
+                        },
+                        .seldepth => |plies| {
+                            _ = plies;
+                        },
+                        .time => |millis| {
+                            _ = millis;
+                        },
+                        .nodes => |number| {
+                            _ = number;
+                        },
+                        .pv => |line| {
+                            _ = line;
+                        },
+                        .multipv => |number| {
+                            _ = number;
+                        },
+                        .score => |score| {
+                            switch (score) {
+                                .cp => |centipawns| {
+                                    _ = centipawns;
+                                },
+                                .mate => |number| {
+                                    _ = number;
+                                },
+                                .lowerbound => |number| {
+                                    _ = number;
+                                },
+                                .upperbound => |number| {
+                                    _ = number;
+                                }
+                            }
+                        },
+                        .currmove => |move| {
+                            _ = move;
+
+                        },
+                        .currmovenumber => |number| {
+                            _ = number;
+
+                        },
+                        .hashfull => |permill| {
+                            _ = permill;
+
+                        },
+                        .nps => |nodes_per_sec| {
+                            _ = nodes_per_sec;
+                        },
+                        .tbhits => |number| {
+                            _ = number;
+                        },
+                        .sbhits => |number| {
+                            _ = number;
+
+                        },
+                        .cpuload => |permill| {
+                            _ = permill;
+
+                        },
+                        .string => |str| {
+                            _ = str;
+
+                        },
+                        .refutation => |moves| {
+                            _ = moves;
+
+                        },
+                        .currline => |payload| {
+                            _ = payload;
+                        },
+                    }
+                },
+                .option => |option| {
+                    // TODO
+                    _ = option;
+                    unreachable;
+                },
             }
         }
 
@@ -765,5 +966,15 @@ test "Parsing command from string produces accurate tagged enum from valid comma
     }
 
     // TODO - Test `go searchmoves` when that is implemented
+
+
+    // stop
+    try std.testing.expectEqual(.stop, UciCommand.GuiToEngineCommand.fromString(&"stop"));
+
+    // ponderhit
+    try std.testing.expectEqual(.ponderhit, UciCommand.GuiToEngineCommand.fromString(&"ponderhit"));
+
+    // quit
+    try std.testing.expectEqual(.quit, UciCommand.GuiToEngineCommand.fromString(&"quit"));
 }
 
