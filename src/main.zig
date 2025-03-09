@@ -9,7 +9,8 @@ pub fn main() !void {
     const interface = Interface.init(stdin, stdout);
     _ = interface;
 
-    const b = bitboards.Board.init();
-    std.debug.print("{}\n", .{b});
+    // TODO - Utilize multiple processes: One for I/O and one for the evaluation part
+    // TODO - Poll on new input to stdin (wait for some amount of time between polls)
+    //        On new input, parse it into command and respond accordingly
 }
 

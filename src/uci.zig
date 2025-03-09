@@ -6,9 +6,9 @@ const mem = std.mem;
 // described at https://gist.github.com/DOBRO/2592c6dad754ba67e6dcaec8c90165bf
 
 pub const UciCommand = enum {
-    pub const GuiToEngineCommand = enum {
+    pub const GuiToEngineCommand = union(enum) {
         uci,
-        debug, // allowed tokens "on" and "off"
+        debug: bool, // allowed tokens "on" and "off"
         isready,
         setoption, // allowed token [name <id> {value <x>}]
         register, // allowed tokens "later", "name <x>", "code <y>"
@@ -22,30 +22,50 @@ pub const UciCommand = enum {
         const This = @This();
 
         pub fn fromString(str: *const []const u8) GuiToEngineCommand {
-            if (mem.eql(u8, str.*, comptime std.enums.tagName(GuiToEngineCommand, .uci).?)) {
+            var parts = mem.splitScalar(u8, str.*, ' ');
+
+            const first = parts.first();
+
+            if (mem.eql(u8, first, "uci")) {
                 return .uci;
-            } else if (mem.eql(u8, str.*, comptime std.enums.tagName(GuiToEngineCommand, .debug).?)) {
-                std.debug.print("Hit a command that has a payload and lost it!\n", .{});
-                unreachable;
-            } else if (mem.eql(u8, str.*, comptime std.enums.tagName(GuiToEngineCommand, .quit).?)) {
+
+            } else if (mem.eql(u8, first, "debug")) {
+                while (parts.next()) |option| {
+                    if (mem.eql(u8, option, "on")) {
+                        return GuiToEngineCommand{ .debug = true };
+                    } else if (mem.eql(u8, option, "off")) {
+                        return GuiToEngineCommand{ .debug = false };
+                    }
+                }
+
+            } else if (mem.eql(u8, first, "quit")) {
                 std.debug.print("Could not deserialize a {s} from input '{s}'\n", .{ @typeName(This), str });
                 unreachable;
+
             } else {
                 std.debug.print("Could not deserialize a {s} from input '{s}'\n", .{ @typeName(This), str });
                 unreachable;
+
             }
+
+            unreachable;
         }
     };
 
-    pub const EngineToGuiCommand = enum {
-        id, // subcommands "name <x>", "author <y>"
+    pub const EngineToGuiCommandId = union(enum) {
+        name:   []const u8,
+        author: []const u8,
+    };
+
+    pub const EngineToGuiCommand = union(enum) {
+        id: EngineToGuiCommand,
         uciok,
         readyok,
         bestmove,
 
         // These two are unimplemented for now
-        // copyprotection,
-        // registration
+        copyprotection,
+        registration,
 
         info, // tons of subcommands
         option, // tons of subcommands
@@ -67,29 +87,37 @@ pub fn Interface(comptime ReaderType: type, comptime WriterType: type) type {
         }
 
         pub fn send(self: *@This(), command: UciCommand.EngineToGuiCommand) !void {
+            _ = command;
             _ = self;
-            switch (command) {
-                .id => {
-                },
-                else => {
-                },
-            }
         }
 
-        /// On receipt of a new line to the input reader, attempt to parse the
-        /// line into a command
-        pub inline fn onReceivedCommand(line: *[]u8) ?UciCommand.GuiToEngineCommand {
-            const parsed = UciCommand.GuiToEngineCommand.fromString(line);
-            _ = parsed;
-
-            return null;
+        pub fn onInputCommand(self: *@This(), input: UciCommand.GuiToEngineCommand) !void {
+            switch (input) {
+                .uci => {
+                    try self.send(.{ .id = .{ .name = "Name" }});
+                    try self.send(.{ .id = .{ .author = "Author" }});
+                    try self.send(.{ .uciok });
+                }
+            }
         }
     };
 }
 
 test "Parse command from string" {
     try std.testing.expectEqual(
-        UciCommand.GuiToEngineCommand.uci,
-        UciCommand.GuiToEngineCommand.fromString(&"uci"));
+        .uci,
+        UciCommand.GuiToEngineCommand.fromString(&"uci   ignorethis"));
+
+    try std.testing.expectEqual(
+        .{ .debug = true },
+        UciCommand.GuiToEngineCommand.fromString(&"debug on"));
+
+    try std.testing.expectEqual(
+        .{ .debug = false },
+        UciCommand.GuiToEngineCommand.fromString(&"debug off"));
+
+    try std.testing.expectEqual(
+        .{ .debug = false },
+        UciCommand.GuiToEngineCommand.fromString(&"debug ignored off ignoredagain"));
 }
 
