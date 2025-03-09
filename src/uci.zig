@@ -32,7 +32,53 @@ pub const UciCommand = enum {
         },
         ucinewgame, // unclear how to handle this one
         position, // [fen <fenstring> | startpos ]  moves <move1> .... <movei>
-        go, // tons of subcommands
+        /// Start calculating on the current position set up with the "position" command
+        go: struct {
+            /// Restrict search to these moves only
+            // TODO - Consider updating type once we have solidified an approach
+            //        to parsing FEN moves into something typesafe & descriptive
+            searchmoves: ?[][]const u8,
+
+            /// Start searching in pondering mode.
+            /// I don't understand the specification on this one.
+            ponder: bool,
+            
+            /// White has <value> milliseconds left on the clock.
+            /// TODO - Determine appropriate level of precision, could this be 16 bits instead?
+            wtime: ?u32,
+
+            /// Black has <value> milliseconds left on the clock.
+            /// TODO - Determine appropriate level of precision, could this be 16 bits instead?
+            btime: ?u32,
+
+            /// White increment per move in milliseconds if <value> > 0
+            winc: ?u32,
+
+            /// Black increment per move in milliseconds if <value> > 0
+            binc: ?u32,
+
+            /// There are <value> moves to the next time control.
+            /// If present at all, <value> > 0.
+            /// If this is not received, but wtime and btime are received,
+            /// it's sudden death.
+            movestogo: ?u8,
+
+            /// Search <value> plies only
+            depth: ?u16,
+
+            /// Search <value> nodes only
+            nodes: ?u16,
+
+            /// Search for a mate in <value> moves
+            mate: ?u16,
+
+            /// Search exactly <value> milliseconds
+            movetime: ?u32,
+
+            /// Search until the stop command. If this is present (`true`),
+            /// do not exit search unless the `stop` command is received.
+            infinite: bool,
+        },
         stop,
         ponderhit,
         quit,
@@ -48,6 +94,8 @@ pub const UciCommand = enum {
         // TODO - All the string comparison here is surely expensive, figure out if it is
         //        actually unavoidable.
         pub fn fromString(str: *const []const u8) GuiToEngineCommand {
+            // TODO - It's probably unlikely but what if a UI is devious enough
+            //        to use a tab character as its delimiter?
             var parts = mem.splitScalar(u8, str.*, ' ');
 
             const first = parts.first();
@@ -108,6 +156,7 @@ pub const UciCommand = enum {
                     std.debug.assert(name_value != null);
 
                     payload.name = name_value;
+
                 } else if (mem.eql(u8, register_strategy.?, "code")) {
                     const code_value = parts.next();
                     std.debug.assert(code_value != null);
@@ -159,6 +208,114 @@ pub const UciCommand = enum {
                         }
                     }
                 };
+
+            } else if (mem.eql(u8, first, "ucinewgame")) {
+                return .ucinewgame;
+
+            } else if (mem.eql(u8, first, "position")) {
+                // TODO - This is going to be a lot and will involve parsing FEN position strings.
+                //        I'll do this one last.
+
+            } else if (mem.eql(u8, first, "go")) {
+                // Extract the type of the payload
+                const GoPayload = @TypeOf(@as(UciCommand.GuiToEngineCommand, undefined).go);
+
+                var payload: GoPayload = .{
+                    .searchmoves = null,
+                    .ponder = false,
+                    .wtime = null,
+                    .btime = null,
+                    .winc = null,
+                    .binc = null,
+                    .movestogo = null,
+                    .depth = null,
+                    .nodes = null,
+                    .mate = null,
+                    .movetime = null,
+                    .infinite = false,
+                };
+
+                // This command has lots of subcommands, many of which require parsing
+                // strings into integers. Currently, all parse errors will cause
+                // crashes since bugs are assumed to originate from this implementation of
+                // the protocol rather than the UI sending faulty commands.
+                while (parts.next()) |subcmd| {
+                    if (mem.eql(u8, subcmd, "searchmoves")) {
+                        // FIXME
+                        unreachable;
+
+                    } else if (mem.eql(u8, subcmd, "ponder")) {
+                        payload.ponder = true;
+
+                    } else if (mem.eql(u8, subcmd, "wtime")) {
+                        const value = parts.next();
+                        std.debug.assert(value != null);
+
+                        const parsed = std.fmt.parseUnsigned(u32, value.?, 10) catch unreachable;
+                        payload.wtime = parsed;
+
+                    } else if (mem.eql(u8, subcmd, "btime")) {
+                        const value = parts.next();
+                        std.debug.assert(value != null);
+
+                        const parsed = std.fmt.parseUnsigned(u32, value.?, 10) catch unreachable;
+                        payload.btime = parsed;
+
+                    } else if (mem.eql(u8, subcmd, "winc")) {
+                        const value = parts.next();
+                        std.debug.assert(value != null);
+
+                        const parsed = std.fmt.parseUnsigned(u32, value.?, 10) catch unreachable;
+                        payload.winc = parsed;
+
+                    } else if (mem.eql(u8, subcmd, "binc")) {
+                        const value = parts.next();
+                        std.debug.assert(value != null);
+
+                        const parsed = std.fmt.parseUnsigned(u32, value.?, 10) catch unreachable;
+                        payload.binc = parsed;
+
+                    } else if (mem.eql(u8, subcmd, "movestogo")) {
+                        const value = parts.next();
+                        std.debug.assert(value != null);
+
+                        const parsed = std.fmt.parseUnsigned(u8, value.?, 10) catch unreachable;
+                        payload.movestogo = parsed;
+
+                    } else if (mem.eql(u8, subcmd, "depth")) {
+                        const value = parts.next();
+                        std.debug.assert(value != null);
+
+                        const parsed = std.fmt.parseUnsigned(u16, value.?, 10) catch unreachable;
+                        payload.depth = parsed;
+
+                    } else if (mem.eql(u8, subcmd, "nodes")) {
+                        const value = parts.next();
+                        std.debug.assert(value != null);
+
+                        const parsed = std.fmt.parseUnsigned(u16, value.?, 10) catch unreachable;
+                        payload.nodes = parsed;
+
+                    } else if (mem.eql(u8, subcmd, "mate")) {
+                        const value = parts.next();
+                        std.debug.assert(value != null);
+
+                        const parsed = std.fmt.parseUnsigned(u16, value.?, 10) catch unreachable;
+                        payload.mate = parsed;
+
+                    } else if (mem.eql(u8, subcmd, "movetime")) {
+                        const value = parts.next();
+                        std.debug.assert(value != null);
+
+                        const parsed = std.fmt.parseUnsigned(u32, value.?, 10) catch unreachable;
+                        payload.movetime = parsed;
+
+                    } else if (mem.eql(u8, subcmd, "infinite")) {
+                        payload.infinite = true;
+                    }
+                }
+
+                return GuiToEngineCommand{ .go = payload };
 
             } else if (mem.eql(u8, first, "quit")) {
                 std.debug.print("Could not deserialize a {s} from input '{s}'\n", .{ @typeName(This), str });
@@ -275,34 +432,338 @@ test "Parsing command from string produces accurate tagged enum from valid comma
         UciCommand.GuiToEngineCommand.fromString(&"debug ignored off ignoredagain"));
 
     // setopt
-    const parsed_setopt_val   = UciCommand.GuiToEngineCommand.fromString(&"setoption name hello value world");
-    const expected_setopt_val = UciCommand.GuiToEngineCommand{ .setoption = .{ .name = "hello", .value = "world" } };
-    try std.testing.expectEqualStrings(parsed_setopt_val.setoption.name, expected_setopt_val.setoption.name);
-    try std.testing.expectEqualStrings(parsed_setopt_val.setoption.value.?, expected_setopt_val.setoption.value.?);
+    {
+        const parsed   = UciCommand.GuiToEngineCommand.fromString(&"setoption name hello value world");
+        const expected = UciCommand.GuiToEngineCommand{ .setoption = .{ .name = "hello", .value = "world" } };
+        try std.testing.expectEqualStrings(expected.setoption.name, parsed.setoption.name);
+        try std.testing.expectEqualStrings(expected.setoption.value.?, parsed.setoption.value.?);
+    }
 
-    const parsed_setopt   = UciCommand.GuiToEngineCommand.fromString(&"setoption name hello");
-    const expected_setopt = UciCommand.GuiToEngineCommand{ .setoption = .{ .name = "hello", .value = null } };
-    try std.testing.expectEqualStrings(expected_setopt.setoption.name, parsed_setopt.setoption.name);
-    try std.testing.expectEqual(null, parsed_setopt.setoption.value);
+    {
+        const parsed   = UciCommand.GuiToEngineCommand.fromString(&"setoption name hello");
+        const expected = UciCommand.GuiToEngineCommand{ .setoption = .{ .name = "hello", .value = null } };
+        try std.testing.expectEqualStrings(expected.setoption.name, parsed.setoption.name);
+        try std.testing.expectEqual(null, parsed.setoption.value);
+    }
 
     // register
-    const parsed_reg_ltr   = UciCommand.GuiToEngineCommand.fromString(&"register later");
-    const expected_reg_ltr = UciCommand.GuiToEngineCommand{ .register = .later };
-    try std.testing.expectEqual(expected_reg_ltr, parsed_reg_ltr);
+    {
+        const parsed   = UciCommand.GuiToEngineCommand.fromString(&"register later");
+        const expected = UciCommand.GuiToEngineCommand{ .register = .later };
+        try std.testing.expectEqual(expected, parsed);
+    }
 
-    const parsed_reg_name   = UciCommand.GuiToEngineCommand.fromString(&"register name ligma");
-    const expected_reg_name = UciCommand.GuiToEngineCommand { .register = .{ .now = .{ .name = "ligma", .code = null } } };
-    try std.testing.expectEqualStrings(parsed_reg_name.register.now.name.?, expected_reg_name.register.now.name.?);
-    try std.testing.expectEqual(parsed_reg_name.register.now.code, expected_reg_name.register.now.code);
+    {
+        const parsed   = UciCommand.GuiToEngineCommand.fromString(&"register name ligma");
+        const expected = UciCommand.GuiToEngineCommand { .register = .{ .now = .{ .name = "ligma", .code = null } } };
+        try std.testing.expectEqualStrings(expected.register.now.name.?, parsed.register.now.name.?);
+        try std.testing.expectEqual(expected.register.now.code, parsed.register.now.code);
+    }
 
-    const parsed_reg_code   = UciCommand.GuiToEngineCommand.fromString(&"register code 9001");
-    const expected_reg_code = UciCommand.GuiToEngineCommand { .register = .{ .now = .{ .name = null, .code = "9001" } } };
-    try std.testing.expectEqualStrings(parsed_reg_code.register.now.code.?, expected_reg_code.register.now.code.?);
-    try std.testing.expectEqual(parsed_reg_code.register.now.name, expected_reg_code.register.now.name);
+    {
+        const parsed   = UciCommand.GuiToEngineCommand.fromString(&"register code 9001");
+        const expected = UciCommand.GuiToEngineCommand { .register = .{ .now = .{ .name = null, .code = "9001" } } };
+        try std.testing.expectEqualStrings(expected.register.now.code.?, parsed.register.now.code.?);
+        try std.testing.expectEqual(expected.register.now.name, parsed.register.now.name);
+    }
 
-    const parsed_reg_both   = UciCommand.GuiToEngineCommand.fromString(&"register code 9001 name ligma");
-    const expected_reg_both = UciCommand.GuiToEngineCommand { .register = .{ .now = .{ .name = "ligma", .code = "9001" } } };
-    try std.testing.expectEqualStrings(parsed_reg_both.register.now.code.?, expected_reg_both.register.now.code.?);
-    try std.testing.expectEqualStrings(parsed_reg_both.register.now.name.?, expected_reg_both.register.now.name.?);
+    {
+        const parsed   = UciCommand.GuiToEngineCommand.fromString(&"register code 9001 name ligma");
+        const expected = UciCommand.GuiToEngineCommand { .register = .{ .now = .{ .name = "ligma", .code = "9001" } } };
+        try std.testing.expectEqualStrings(expected.register.now.code.?, parsed.register.now.code.?);
+        try std.testing.expectEqualStrings(expected.register.now.name.?, parsed.register.now.name.?);
+    }
+
+    // ucinewgame
+    try std.testing.expectEqual(.ucinewgame, UciCommand.GuiToEngineCommand.fromString(&"ucinewgame ignored ignoredagain"));
+
+
+    // go with no subcommands (empty payload with defaults)
+    {
+        const parsed = UciCommand.GuiToEngineCommand.fromString(&"go");
+        const expected = UciCommand.GuiToEngineCommand{
+            .go = .{
+                .searchmoves = null,
+                .ponder = false,
+                .wtime = null,
+                .btime = null,
+                .winc = null,
+                .binc = null,
+                .movestogo = null,
+                .depth = null,
+                .nodes = null,
+                .mate = null,
+                .movetime = null,
+                .infinite = false,
+            }
+        };
+        try std.testing.expectEqual(expected, parsed);
+    }
+
+    // go with ponder flag
+    {
+        const parsed = UciCommand.GuiToEngineCommand.fromString(&"go ponder");
+        const expected = UciCommand.GuiToEngineCommand{
+            .go = .{
+                .searchmoves = null,
+                .ponder = true,
+                .wtime = null,
+                .btime = null,
+                .winc = null,
+                .binc = null,
+                .movestogo = null,
+                .depth = null,
+                .nodes = null,
+                .mate = null,
+                .movetime = null,
+                .infinite = false,
+            }
+        };
+        try std.testing.expectEqual(expected, parsed);
+    }
+
+    // go with wtime
+    {
+        const parsed = UciCommand.GuiToEngineCommand.fromString(&"go wtime 5000");
+        const expected = UciCommand.GuiToEngineCommand{
+            .go = .{
+                .searchmoves = null,
+                .ponder = false,
+                .wtime = 5000,
+                .btime = null,
+                .winc = null,
+                .binc = null,
+                .movestogo = null,
+                .depth = null,
+                .nodes = null,
+                .mate = null,
+                .movetime = null,
+                .infinite = false,
+            }
+        };
+        try std.testing.expectEqual(expected, parsed);
+    }
+
+    // go with btime
+    {
+        const parsed = UciCommand.GuiToEngineCommand.fromString(&"go btime 4000");
+        const expected = UciCommand.GuiToEngineCommand{
+            .go = .{
+                .searchmoves = null,
+                .ponder = false,
+                .wtime = null,
+                .btime = 4000,
+                .winc = null,
+                .binc = null,
+                .movestogo = null,
+                .depth = null,
+                .nodes = null,
+                .mate = null,
+                .movetime = null,
+                .infinite = false,
+            }
+        };
+        try std.testing.expectEqual(expected, parsed);
+    }
+
+    // go with winc
+    {
+        const parsed = UciCommand.GuiToEngineCommand.fromString(&"go winc 300");
+        const expected = UciCommand.GuiToEngineCommand{
+            .go = .{
+                .searchmoves = null,
+                .ponder = false,
+                .wtime = null,
+                .btime = null,
+                .winc = 300,
+                .binc = null,
+                .movestogo = null,
+                .depth = null,
+                .nodes = null,
+                .mate = null,
+                .movetime = null,
+                .infinite = false,
+            }
+        };
+        try std.testing.expectEqual(expected, parsed);
+    }
+
+    // go with binc
+    {
+        const parsed = UciCommand.GuiToEngineCommand.fromString(&"go binc 300");
+        const expected = UciCommand.GuiToEngineCommand{
+            .go = .{
+                .searchmoves = null,
+                .ponder = false,
+                .wtime = null,
+                .btime = null,
+                .winc = null,
+                .binc = 300,
+                .movestogo = null,
+                .depth = null,
+                .nodes = null,
+                .mate = null,
+                .movetime = null,
+                .infinite = false,
+            }
+        };
+        try std.testing.expectEqual(expected, parsed);
+    }
+
+    // go with movestogo
+    {
+        const parsed = UciCommand.GuiToEngineCommand.fromString(&"go movestogo 30");
+        const expected = UciCommand.GuiToEngineCommand{
+            .go = .{
+                .searchmoves = null,
+                .ponder = false,
+                .wtime = null,
+                .btime = null,
+                .winc = null,
+                .binc = null,
+                .movestogo = 30,
+                .depth = null,
+                .nodes = null,
+                .mate = null,
+                .movetime = null,
+                .infinite = false,
+            }
+        };
+        try std.testing.expectEqual(expected, parsed);
+    }
+
+    // go with depth
+    {
+        const parsed = UciCommand.GuiToEngineCommand.fromString(&"go depth 10");
+        const expected = UciCommand.GuiToEngineCommand{
+            .go = .{
+                .searchmoves = null,
+                .ponder = false,
+                .wtime = null,
+                .btime = null,
+                .winc = null,
+                .binc = null,
+                .movestogo = null,
+                .depth = 10,
+                .nodes = null,
+                .mate = null,
+                .movetime = null,
+                .infinite = false,
+            }
+        };
+        try std.testing.expectEqual(expected, parsed);
+    }
+
+    // go with nodes
+    {
+        const parsed = UciCommand.GuiToEngineCommand.fromString(&"go nodes 10000");
+        const expected = UciCommand.GuiToEngineCommand{
+            .go = .{
+                .searchmoves = null,
+                .ponder = false,
+                .wtime = null,
+                .btime = null,
+                .winc = null,
+                .binc = null,
+                .movestogo = null,
+                .depth = null,
+                .nodes = 10000,
+                .mate = null,
+                .movetime = null,
+                .infinite = false,
+            }
+        };
+        try std.testing.expectEqual(expected, parsed);
+    }
+
+    // go with mate
+    {
+        const parsed = UciCommand.GuiToEngineCommand.fromString(&"go mate 3");
+        const expected = UciCommand.GuiToEngineCommand{
+            .go = .{
+                .searchmoves = null,
+                .ponder = false,
+                .wtime = null,
+                .btime = null,
+                .winc = null,
+                .binc = null,
+                .movestogo = null,
+                .depth = null,
+                .nodes = null,
+                .mate = 3,
+                .movetime = null,
+                .infinite = false,
+            }
+        };
+        try std.testing.expectEqual(expected, parsed);
+    }
+
+    // go with movetime
+    {
+        const parsed = UciCommand.GuiToEngineCommand.fromString(&"go movetime 1000");
+        const expected = UciCommand.GuiToEngineCommand{
+            .go = .{
+                .searchmoves = null,
+                .ponder = false,
+                .wtime = null,
+                .btime = null,
+                .winc = null,
+                .binc = null,
+                .movestogo = null,
+                .depth = null,
+                .nodes = null,
+                .mate = null,
+                .movetime = 1000,
+                .infinite = false,
+            }
+        };
+        try std.testing.expectEqual(expected, parsed);
+    }
+    
+    // go with infinite flag
+    {
+        const parsed = UciCommand.GuiToEngineCommand.fromString(&"go infinite");
+        const expected = UciCommand.GuiToEngineCommand{
+            .go = .{
+                .searchmoves = null,
+                .ponder = false,
+                .wtime = null,
+                .btime = null,
+                .winc = null,
+                .binc = null,
+                .movestogo = null,
+                .depth = null,
+                .nodes = null,
+                .mate = null,
+                .movetime = null,
+                .infinite = true,
+            }
+        };
+        try std.testing.expectEqual(expected, parsed);
+    }
+
+    // go with multiple flags
+    {
+        const parsed = UciCommand.GuiToEngineCommand.fromString(&"go wtime 5000 btime 4000 winc 100 binc 100 depth 8 infinite");
+        const expected = UciCommand.GuiToEngineCommand{
+            .go = .{
+                .searchmoves = null,
+                .ponder = false,
+                .wtime = 5000,
+                .btime = 4000,
+                .winc = 100,
+                .binc = 100,
+                .movestogo = null,
+                .depth = 8,
+                .nodes = null,
+                .mate = null,
+                .movetime = null,
+                .infinite = true,
+            }
+        };
+        try std.testing.expectEqual(expected, parsed);
+    }
+
+    // TODO - Test `go searchmoves` when that is implemented
 }
 
