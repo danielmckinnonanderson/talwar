@@ -58,7 +58,7 @@ pub const UciCommand = enum {
     };
 
     pub const EngineToGuiCommand = union(enum) {
-        id: EngineToGuiCommand,
+        id: EngineToGuiCommandId,
         uciok,
         readyok,
         bestmove,
@@ -86,9 +86,36 @@ pub fn Interface(comptime ReaderType: type, comptime WriterType: type) type {
             };
         }
 
+        pub fn poll(self: *@This()) !?UciCommand.GuiToEngineCommand {
+            var buf: [128]u8 = undefined;
+            const input = try self.input_stream.readUntilDelimiterOrEof(&buf, '\n');
+
+            if (input == null) {
+                return null;
+            }
+
+            return UciCommand.GuiToEngineCommand.fromString(&input.?);
+        }
+
         pub fn send(self: *@This(), command: UciCommand.EngineToGuiCommand) !void {
-            _ = command;
-            _ = self;
+            switch (command) {
+                .id => |subcommand| {
+                    switch (subcommand) {
+                        .author => {
+                            try self.output_stream.print("id author Daniel\n", .{});
+                        },
+                        .name => {
+                            try self.output_stream.print("id name Talwar [development]\n", .{});
+                        },
+                    }
+                },
+                .uciok => {
+                    try self.output_stream.print("uciok\n", .{});
+                },
+                else => {
+                    unreachable;
+                }
+            }
         }
 
         pub fn onInputCommand(self: *@This(), input: UciCommand.GuiToEngineCommand) !void {
@@ -96,7 +123,10 @@ pub fn Interface(comptime ReaderType: type, comptime WriterType: type) type {
                 .uci => {
                     try self.send(.{ .id = .{ .name = "Name" }});
                     try self.send(.{ .id = .{ .author = "Author" }});
-                    try self.send(.{ .uciok });
+                    try self.send(.uciok);
+                },
+                else => {
+                    unreachable;
                 }
             }
         }
