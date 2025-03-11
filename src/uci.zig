@@ -5,8 +5,8 @@ const mem = std.mem;
 // This section is based on the specification of the UCI protocol
 // described at https://gist.github.com/DOBRO/2592c6dad754ba67e6dcaec8c90165bf
 
-pub const UciCommand = enum {
-    pub const GuiToEngineCommand = union(enum) {
+pub const Uci = enum {
+    pub const EngineCommand = union(enum) {
         uci,
         debug: bool, // allowed tokens "on" and "off"
         isready,
@@ -85,7 +85,12 @@ pub const UciCommand = enum {
 
         const This = @This();
 
-        const CommandParseError = error { NotACommand, IllegalCommandState, IntegerParseError, };
+        const ParseError = error {
+            NotACommand,
+            IllegalCommandState,
+            IntegerParseError,
+            Unimplemented
+        };
 
         /// Parse a string literal into a command from the GUI to the engine, including
         /// the command's payload.
@@ -95,7 +100,7 @@ pub const UciCommand = enum {
         // TODO - Don't crash on bad commands once this implementation is reasonably stable.
         // TODO - All the string comparison here is surely expensive, figure out if it is
         //        actually unavoidable.
-        pub fn fromString(str: *const []const u8) CommandParseError!GuiToEngineCommand {
+        pub fn fromString(str: *const []const u8) ParseError!EngineCommand {
             // TODO - It's probably unlikely but what if a UI is devious enough
             //        to use a tab character as its delimiter?
             var parts = mem.splitScalar(u8, str.*, ' ');
@@ -108,11 +113,14 @@ pub const UciCommand = enum {
             } else if (mem.eql(u8, first, "debug")) {
                 while (parts.next()) |option| {
                     if (mem.eql(u8, option, "on")) {
-                        return GuiToEngineCommand{ .debug = true };
+                        return EngineCommand{ .debug = true };
                     } else if (mem.eql(u8, option, "off")) {
-                        return GuiToEngineCommand{ .debug = false };
+                        return EngineCommand{ .debug = false };
                     }
                 }
+
+                return ParseError.IllegalCommandState;
+
             } else if (mem.eql(u8, first, "isready")) {
                 return .isready;
 
@@ -120,28 +128,30 @@ pub const UciCommand = enum {
                 const name_label = parts.next();
 
                 if (name_label != null and !mem.eql(u8, name_label.?, "name")) {
-                    return CommandParseError.IllegalCommandState;
+                    return ParseError.IllegalCommandState;
                 }
 
                 const option_name = parts.next();
                 if (option_name == null) {
-                    return CommandParseError.IllegalCommandState;
+                    return ParseError.IllegalCommandState;
                 }
 
                 const value_label = parts.next();
                 if (value_label == null) {
                     // If there's no value, then the command is complete
                     // and we can be finished
-                    return GuiToEngineCommand{ .setoption = .{ .name = option_name.?, .value = null } };
+                    return EngineCommand{ .setoption = .{ .name = option_name.?, .value = null } };
                 }
 
                 // otherwise, continue parsing to get the value for the
                 // option being set
-                std.debug.assert(mem.eql(u8, value_label.?, "value"));
+                if (!mem.eql(u8, value_label.?, "value")) {
+                    return ParseError.IllegalCommandState;
+                }
 
                 const option_value = parts.next();
                 std.debug.assert(option_value != null);
-                return GuiToEngineCommand{ .setoption = .{ .name = option_name.?, .value = option_value } };
+                return EngineCommand{ .setoption = .{ .name = option_name.?, .value = option_value } };
 
             } else if (mem.eql(u8, first, "register")) {
                 const register_strategy = parts.next();
@@ -149,7 +159,7 @@ pub const UciCommand = enum {
 
                 
                 if (mem.eql(u8, register_strategy.?, "later")) {
-                    return GuiToEngineCommand{ .register = .later };
+                    return EngineCommand{ .register = .later };
                 }
 
                 var payload: struct { name: ?[]const u8, code: ?[]const u8 } = .{
@@ -159,13 +169,17 @@ pub const UciCommand = enum {
 
                 if (mem.eql(u8, register_strategy.?, "name")) {
                     const name_value = parts.next();
-                    std.debug.assert(name_value != null);
+                    if (name_value == null) {
+                        return ParseError.IllegalCommandState;
+                    }
 
                     payload.name = name_value;
 
                 } else if (mem.eql(u8, register_strategy.?, "code")) {
                     const code_value = parts.next();
-                    std.debug.assert(code_value != null);
+                    if (code_value == null) {
+                        return ParseError.IllegalCommandState;
+                    }
 
                     payload.code = code_value;
                 }
@@ -177,7 +191,7 @@ pub const UciCommand = enum {
                     // that is legal and we are done here so long as one of the
                     // two options is set.
                     if (payload.name != null or payload.code != null) {
-                        return GuiToEngineCommand{
+                        return EngineCommand{
                             .register = .{
                                 .now = .{
                                     .name = payload.name,
@@ -192,7 +206,7 @@ pub const UciCommand = enum {
                 if (mem.eql(u8, next_reg_strat.?, "name")) {
                     const name_value = parts.next();
                     if (name_value == null) {
-                        return CommandParseError.IllegalCommandState;
+                        return ParseError.IllegalCommandState;
                     }
 
                     payload.name = name_value;
@@ -200,7 +214,7 @@ pub const UciCommand = enum {
                 } else if (mem.eql(u8, next_reg_strat.?, "code")) {
                     const code_value = parts.next();
                     if (code_value == null) {
-                        return CommandParseError.IllegalCommandState;
+                        return ParseError.IllegalCommandState;
                     }
 
                     payload.code = code_value;
@@ -211,11 +225,11 @@ pub const UciCommand = enum {
                 // However, just to be safe, we'll assert that both are set
                 // since in theory we could get to this stage parsing input that looks
                 // like "register name somename name someothername".
-                if (payload.code == null and payload.name == null) {
-                    return CommandParseError.IllegalCommandState;
+                if (payload.code == null or payload.name == null) {
+                    return ParseError.IllegalCommandState;
                 }
 
-                return GuiToEngineCommand{
+                return EngineCommand{
                     .register = .{
                         .now = .{
                             .name = payload.name,
@@ -230,10 +244,11 @@ pub const UciCommand = enum {
             } else if (mem.eql(u8, first, "position")) {
                 // TODO - This is going to be a lot and will involve parsing FEN position strings.
                 //        I'll do this one last.
+                return ParseError.Unimplemented;
 
             } else if (mem.eql(u8, first, "go")) {
                 // Extract the type of the payload
-                const GoPayload = @TypeOf(@as(UciCommand.GuiToEngineCommand, undefined).go);
+                const GoPayload = @TypeOf(@as(Uci.EngineCommand, undefined).go);
 
                 var payload: GoPayload = .{
                     .searchmoves = null,
@@ -254,8 +269,7 @@ pub const UciCommand = enum {
                 // strings into integers.
                 while (parts.next()) |subcmd| {
                     if (mem.eql(u8, subcmd, "searchmoves")) {
-                        // FIXME
-                        unreachable;
+                        return ParseError.Unimplemented;
 
                     } else if (mem.eql(u8, subcmd, "ponder")) {
                         payload.ponder = true;
@@ -263,12 +277,11 @@ pub const UciCommand = enum {
                     } else if (mem.eql(u8, subcmd, "wtime")) {
                         const value = parts.next();
                         if (value == null) {
-                            return CommandParseError.IllegalCommandState;
+                            return ParseError.IllegalCommandState;
                         }
-                        std.debug.assert(value != null);
 
                         const parsed = std.fmt.parseUnsigned(u32, value.?, 10)
-                            catch return CommandParseError.IntegerParseError;
+                            catch return ParseError.IntegerParseError;
                         payload.wtime = parsed;
 
                     } else if (mem.eql(u8, subcmd, "btime")) {
@@ -276,7 +289,7 @@ pub const UciCommand = enum {
                         std.debug.assert(value != null);
 
                         const parsed = std.fmt.parseUnsigned(u32, value.?, 10)
-                            catch return CommandParseError.IntegerParseError;
+                            catch return ParseError.IntegerParseError;
                         payload.btime = parsed;
 
                     } else if (mem.eql(u8, subcmd, "winc")) {
@@ -284,7 +297,7 @@ pub const UciCommand = enum {
                         std.debug.assert(value != null);
 
                         const parsed = std.fmt.parseUnsigned(u32, value.?, 10)
-                            catch return CommandParseError.IntegerParseError;
+                            catch return ParseError.IntegerParseError;
                         payload.winc = parsed;
 
                     } else if (mem.eql(u8, subcmd, "binc")) {
@@ -292,7 +305,7 @@ pub const UciCommand = enum {
                         std.debug.assert(value != null);
 
                         const parsed = std.fmt.parseUnsigned(u32, value.?, 10)
-                            catch return CommandParseError.IntegerParseError;
+                            catch return ParseError.IntegerParseError;
 
                         payload.binc = parsed;
 
@@ -301,7 +314,7 @@ pub const UciCommand = enum {
                         std.debug.assert(value != null);
 
                         const parsed = std.fmt.parseUnsigned(u8, value.?, 10)
-                            catch return CommandParseError.IntegerParseError;
+                            catch return ParseError.IntegerParseError;
 
                         payload.movestogo = parsed;
 
@@ -310,7 +323,7 @@ pub const UciCommand = enum {
                         std.debug.assert(value != null);
 
                         const parsed = std.fmt.parseUnsigned(u16, value.?, 10)
-                            catch return CommandParseError.IntegerParseError;
+                            catch return ParseError.IntegerParseError;
                         payload.depth = parsed;
 
                     } else if (mem.eql(u8, subcmd, "nodes")) {
@@ -318,7 +331,7 @@ pub const UciCommand = enum {
                         std.debug.assert(value != null);
 
                         const parsed = std.fmt.parseUnsigned(u16, value.?, 10)
-                            catch return CommandParseError.IntegerParseError;
+                            catch return ParseError.IntegerParseError;
                         payload.nodes = parsed;
 
                     } else if (mem.eql(u8, subcmd, "mate")) {
@@ -326,7 +339,7 @@ pub const UciCommand = enum {
                         std.debug.assert(value != null);
 
                         const parsed = std.fmt.parseUnsigned(u16, value.?, 10)
-                            catch return CommandParseError.IntegerParseError;
+                            catch return ParseError.IntegerParseError;
                         payload.mate = parsed;
 
                     } else if (mem.eql(u8, subcmd, "movetime")) {
@@ -334,7 +347,7 @@ pub const UciCommand = enum {
                         std.debug.assert(value != null);
 
                         const parsed = std.fmt.parseUnsigned(u32, value.?, 10)
-                            catch return CommandParseError.IntegerParseError;
+                            catch return ParseError.IntegerParseError;
                         payload.movetime = parsed;
 
                     } else if (mem.eql(u8, subcmd, "infinite")) {
@@ -342,7 +355,7 @@ pub const UciCommand = enum {
                     }
                 }
 
-                return GuiToEngineCommand{ .go = payload };
+                return EngineCommand{ .go = payload };
 
             } else if (mem.eql(u8, first, "stop")) {
                 return .stop;
@@ -354,11 +367,11 @@ pub const UciCommand = enum {
                 return .quit;
             }
 
-            return CommandParseError.NotACommand;
+            return ParseError.NotACommand;
         }
     };
 
-    pub const EngineToGuiCommand = union(enum) {
+    pub const GuiCommand = union(enum) {
         id: union(enum) {
             name: []const u8,
             author: []const u8,
@@ -483,7 +496,7 @@ pub fn Interface(comptime ReaderType: type, comptime WriterType: type) type {
         /// Check the input stream for new commands.
         /// If no input is present, return `null`.
         /// If an input is present, attempt to parse it and returned the parsed command, or an error.
-        pub fn poll(self: *@This()) !?UciCommand.GuiToEngineCommand {
+        pub fn poll(self: *@This()) !?Uci.EngineCommand {
             var buf: [128]u8 = undefined;
             const input = try self.input_stream.readUntilDelimiterOrEof(&buf, '\n');
 
@@ -491,13 +504,18 @@ pub fn Interface(comptime ReaderType: type, comptime WriterType: type) type {
                 return null;
             }
 
-            return try UciCommand.GuiToEngineCommand.fromString(&input.?);
+            const command = Uci.EngineCommand.fromString(&input.?) catch |err| {
+                std.debug.print("Could not parse command: {}\n", .{err});
+                return null;
+            };
+
+            return command;
         }
 
         const CommandSendError = error{ };
         /// Send the given command to the output stream.
         /// Return an error if the output could not be sent.
-        pub fn send(self: *@This(), command: UciCommand.EngineToGuiCommand) !void {
+        pub fn send(self: *@This(), command: Uci.GuiCommand) !void {
             std.debug.print("Sending something!\n", .{});
 
             var bw = std.io.bufferedWriter(self.output_stream);
@@ -622,7 +640,7 @@ pub fn Interface(comptime ReaderType: type, comptime WriterType: type) type {
             }
         }
 
-        pub fn onInputCommand(self: *@This(), input: UciCommand.GuiToEngineCommand) !void {
+        pub fn onInputCommand(self: *@This(), input: Uci.EngineCommand) !void {
             switch (input) {
                 .uci => {
                     try self.send(.{ .id = .{ .name = "Name" }});
@@ -640,76 +658,127 @@ pub fn Interface(comptime ReaderType: type, comptime WriterType: type) type {
 test "Parses string 'uci' into command" {
     try std.testing.expectEqual(
         .uci,
-        UciCommand.GuiToEngineCommand.fromString(&"uci   ignorethis"));
+        Uci.EngineCommand.fromString(&"uci   ignorethis"));
 }
 
 test "Parses 'debug on' command correctly" {
     try std.testing.expectEqual(
-        UciCommand.GuiToEngineCommand{ .debug = true },
-        UciCommand.GuiToEngineCommand.fromString(&"debug on"));
+        Uci.EngineCommand{ .debug = true },
+        Uci.EngineCommand.fromString(&"debug on"));
 }
 
 test "Parses 'debug off' command correctly" {
     try std.testing.expectEqual(
-        UciCommand.GuiToEngineCommand{ .debug = false },
-        UciCommand.GuiToEngineCommand.fromString(&"debug off"));
+        Uci.EngineCommand{ .debug = false },
+        Uci.EngineCommand.fromString(&"debug off"));
 }
 
-test "Ignores extra tokens in debug command" {
+test "Debug command without valid option returns error" {
+    const Err = Uci.EngineCommand.ParseError;
     try std.testing.expectEqual(
-        UciCommand.GuiToEngineCommand{ .debug = false },
-        UciCommand.GuiToEngineCommand.fromString(&"debug ignored off ignoredagain"));
+        Err.IllegalCommandState,
+        Uci.EngineCommand.fromString(&"debug \t junk"));
+}
+
+test "Ignores extra tokens in otherwise valid 'debug' command" {
+    try std.testing.expectEqual(
+        Uci.EngineCommand{ .debug = false },
+        Uci.EngineCommand.fromString(&"debug ignored off ignoredagain"));
 }
 
 test "Parses 'setoption' command with name and value" {
-    const parsed = try UciCommand.GuiToEngineCommand.fromString(&"setoption name hello value world");
-    const expected = UciCommand.GuiToEngineCommand{ .setoption = .{ .name = "hello", .value = "world" } };
+    const parsed = try Uci.EngineCommand.fromString(&"setoption name hello value world");
+    const expected = Uci.EngineCommand{ .setoption = .{ .name = "hello", .value = "world" } };
     try std.testing.expectEqualStrings(expected.setoption.name, parsed.setoption.name);
     try std.testing.expectEqualStrings(expected.setoption.value.?, parsed.setoption.value.?);
 }
 
 test "Parses 'setoption' command with name only" {
-    const parsed = try UciCommand.GuiToEngineCommand.fromString(&"setoption name hello");
-    const expected = UciCommand.GuiToEngineCommand{ .setoption = .{ .name = "hello", .value = null } };
+    const parsed = try Uci.EngineCommand.fromString(&"setoption name hello");
+    const expected = Uci.EngineCommand{ .setoption = .{ .name = "hello", .value = null } };
     try std.testing.expectEqualStrings(expected.setoption.name, parsed.setoption.name);
     try std.testing.expectEqual(null, parsed.setoption.value);
 }
 
+test "'setoption' with 'value' option but no actual value produces error" {
+    const Err = Uci.EngineCommand.ParseError;
+    const parsed = Uci.EngineCommand.fromString(&"setoption value  \t  ");
+    const expected = Err.IllegalCommandState;
+    try std.testing.expectEqual(expected, parsed);
+}
+
+test "'setoption' without 'name' subcommand produces error" {
+    const Err = Uci.EngineCommand.ParseError;
+    const parsed = Uci.EngineCommand.fromString(&"setoption value 98000");
+    const expected = Err.IllegalCommandState;
+    try std.testing.expectEqual(expected, parsed);
+}
+
 test "Parses 'register later' command" {
-    const parsed = try UciCommand.GuiToEngineCommand.fromString(&"register later");
-    const expected = UciCommand.GuiToEngineCommand{ .register = .later };
+    const parsed = try Uci.EngineCommand.fromString(&"register later");
+    const expected = Uci.EngineCommand{ .register = .later };
     try std.testing.expectEqual(expected, parsed);
 }
 
 test "Parses 'register name' command" {
-    const parsed = try UciCommand.GuiToEngineCommand.fromString(&"register name ligma");
-    const expected = UciCommand.GuiToEngineCommand{ .register = .{ .now = .{ .name = "ligma", .code = null } } };
+    const parsed = try Uci.EngineCommand.fromString(&"register name ligma");
+    const expected = Uci.EngineCommand{ .register = .{ .now = .{ .name = "ligma", .code = null } } };
     try std.testing.expectEqualStrings(expected.register.now.name.?, parsed.register.now.name.?);
     try std.testing.expectEqual(expected.register.now.code, parsed.register.now.code);
 }
 
 test "Parses 'register code' command" {
-    const parsed = try UciCommand.GuiToEngineCommand.fromString(&"register code 9001");
-    const expected = UciCommand.GuiToEngineCommand{ .register = .{ .now = .{ .name = null, .code = "9001" } } };
+    const parsed = try Uci.EngineCommand.fromString(&"register code 9001");
+    const expected = Uci.EngineCommand{ .register = .{ .now = .{ .name = null, .code = "9001" } } };
     try std.testing.expectEqualStrings(expected.register.now.code.?, parsed.register.now.code.?);
     try std.testing.expectEqual(expected.register.now.name, parsed.register.now.name);
 }
 
 test "Parses 'register code and name' command" {
-    const parsed = try UciCommand.GuiToEngineCommand.fromString(&"register code 9001 name ligma");
-    const expected = UciCommand.GuiToEngineCommand{ .register = .{ .now = .{ .name = "ligma", .code = "9001" } } };
+    const parsed = try Uci.EngineCommand.fromString(&"register code 9001 name ligma");
+    const expected = Uci.EngineCommand{ .register = .{ .now = .{ .name = "ligma", .code = "9001" } } };
     try std.testing.expectEqualStrings(expected.register.now.code.?, parsed.register.now.code.?);
     try std.testing.expectEqualStrings(expected.register.now.name.?, parsed.register.now.name.?);
 }
 
-test "Parses 'ucinewgame' command and ignores extra tokens" {
-    try std.testing.expectEqual(.ucinewgame,
-    try UciCommand.GuiToEngineCommand.fromString(&"ucinewgame ignored ignoredagain"));
+test "Register command with no value, code, or later returns error" {
+    const Err = Uci.EngineCommand.ParseError;
+    const parsed = Uci.EngineCommand.fromString(&"register no this will not do");
+    const expected =  Err.IllegalCommandState;
+    try std.testing.expectEqual(expected, parsed);
 }
 
+test "Register command with code but no value returns error" {
+    const Err = Uci.EngineCommand.ParseError;
+    const parsed = Uci.EngineCommand.fromString(&"register code");
+    const expected =  Err.IllegalCommandState;
+    try std.testing.expectEqual(expected, parsed);
+}
+
+test "Register command with multiple instances of name but no code returns error" {
+    const Err = Uci.EngineCommand.ParseError;
+    const parsed = Uci.EngineCommand.fromString(&"register name something name something else");
+    const expected =  Err.IllegalCommandState;
+    try std.testing.expectEqual(expected, parsed);
+}
+
+test "Register command with name but no value returns error" {
+    const Err = Uci.EngineCommand.ParseError;
+    const parsed = Uci.EngineCommand.fromString(&"register name");
+    const expected =  Err.IllegalCommandState;
+    try std.testing.expectEqual(expected, parsed);
+}
+
+test "Parses 'ucinewgame' command and ignores extra tokens" {
+    try std.testing.expectEqual(.ucinewgame,
+    try Uci.EngineCommand.fromString(&"ucinewgame ignored ignoredagain"));
+}
+
+// TODO - Tests for 'position'
+
 test "Parses 'go' command with no subcommands" {
-    const parsed = try UciCommand.GuiToEngineCommand.fromString(&"go");
-    const expected = UciCommand.GuiToEngineCommand{
+    const parsed = try Uci.EngineCommand.fromString(&"go");
+    const expected = Uci.EngineCommand{
         .go = .{
             .searchmoves = null,
             .ponder = false,
@@ -729,8 +798,8 @@ test "Parses 'go' command with no subcommands" {
 }
 
 test "Parses 'go ponder' command" {
-    const parsed = try UciCommand.GuiToEngineCommand.fromString(&"go ponder");
-    const expected = UciCommand.GuiToEngineCommand{
+    const parsed = try Uci.EngineCommand.fromString(&"go ponder");
+    const expected = Uci.EngineCommand{
         .go = .{
             .searchmoves = null,
             .ponder = true,
@@ -749,9 +818,16 @@ test "Parses 'go ponder' command" {
     try std.testing.expectEqual(expected, parsed);
 }
 
+test "'go wtime' command that provides non-integer value returns error" {
+    const parsed = Uci.EngineCommand.fromString(&"go wtime helloworld!");
+    const Err = Uci.EngineCommand.ParseError;
+    const expected = Err.IntegerParseError;
+    try std.testing.expectEqual(expected, parsed);
+}
+
 test "Parses 'go wtime' command" {
-    const parsed = try UciCommand.GuiToEngineCommand.fromString(&"go wtime 5000");
-    const expected = UciCommand.GuiToEngineCommand{
+    const parsed = try Uci.EngineCommand.fromString(&"go wtime 5000");
+    const expected = Uci.EngineCommand{
         .go = .{
             .searchmoves = null,
             .ponder = false,
@@ -770,9 +846,16 @@ test "Parses 'go wtime' command" {
     try std.testing.expectEqual(expected, parsed);
 }
 
+test "'go btime' command that provides non-integer value returns error" {
+    const parsed = Uci.EngineCommand.fromString(&"go btime helloworld!");
+    const Err = Uci.EngineCommand.ParseError;
+    const expected = Err.IntegerParseError;
+    try std.testing.expectEqual(expected, parsed);
+}
+
 test "Parses 'go btime' command" {
-    const parsed = try UciCommand.GuiToEngineCommand.fromString(&"go btime 4000");
-    const expected = UciCommand.GuiToEngineCommand{
+    const parsed = try Uci.EngineCommand.fromString(&"go btime 4000");
+    const expected = Uci.EngineCommand{
         .go = .{
             .searchmoves = null,
             .ponder = false,
@@ -792,8 +875,8 @@ test "Parses 'go btime' command" {
 }
 
 test "Parses 'go winc' command" {
-    const parsed = try UciCommand.GuiToEngineCommand.fromString(&"go winc 300");
-    const expected = UciCommand.GuiToEngineCommand{
+    const parsed = try Uci.EngineCommand.fromString(&"go winc 300");
+    const expected = Uci.EngineCommand{
         .go = .{
             .searchmoves = null,
             .ponder = false,
@@ -812,9 +895,16 @@ test "Parses 'go winc' command" {
     try std.testing.expectEqual(expected, parsed);
 }
 
+test "'go winc' command that provides non-integer value returns error" {
+    const parsed = Uci.EngineCommand.fromString(&"go winc helloworld!");
+    const Err = Uci.EngineCommand.ParseError;
+    const expected = Err.IntegerParseError;
+    try std.testing.expectEqual(expected, parsed);
+}
+
 test "Parses 'go binc' command" {
-    const parsed = try UciCommand.GuiToEngineCommand.fromString(&"go binc 300");
-    const expected = UciCommand.GuiToEngineCommand{
+    const parsed = try Uci.EngineCommand.fromString(&"go binc 300");
+    const expected = Uci.EngineCommand{
         .go = .{
             .searchmoves = null,
             .ponder = false,
@@ -833,9 +923,16 @@ test "Parses 'go binc' command" {
     try std.testing.expectEqual(expected, parsed);
 }
 
+test "'go binc' command that provides non-integer value returns error" {
+    const parsed = Uci.EngineCommand.fromString(&"go binc helloworld!");
+    const Err = Uci.EngineCommand.ParseError;
+    const expected = Err.IntegerParseError;
+    try std.testing.expectEqual(expected, parsed);
+}
+
 test "Parses 'go movestogo' command" {
-    const parsed = try UciCommand.GuiToEngineCommand.fromString(&"go movestogo 30");
-    const expected = UciCommand.GuiToEngineCommand{
+    const parsed = try Uci.EngineCommand.fromString(&"go movestogo 30");
+    const expected = Uci.EngineCommand{
         .go = .{
             .searchmoves = null,
             .ponder = false,
@@ -854,9 +951,16 @@ test "Parses 'go movestogo' command" {
     try std.testing.expectEqual(expected, parsed);
 }
 
+test "'go movestogo' command that provides non-integer value returns error" {
+    const parsed = Uci.EngineCommand.fromString(&"go movestogo thirty");
+    const Err = Uci.EngineCommand.ParseError;
+    const expected = Err.IntegerParseError;
+    try std.testing.expectEqual(expected, parsed);
+}
+
 test "Parses 'go depth' command" {
-    const parsed = try UciCommand.GuiToEngineCommand.fromString(&"go depth 10");
-    const expected = UciCommand.GuiToEngineCommand{
+    const parsed = try Uci.EngineCommand.fromString(&"go depth 10");
+    const expected = Uci.EngineCommand{
         .go = .{
             .searchmoves = null,
             .ponder = false,
@@ -875,9 +979,16 @@ test "Parses 'go depth' command" {
     try std.testing.expectEqual(expected, parsed);
 }
 
+test "'go depth' command that provides non-integer value returns error" {
+    const parsed = Uci.EngineCommand.fromString(&"go depth ten");
+    const Err = Uci.EngineCommand.ParseError;
+    const expected = Err.IntegerParseError;
+    try std.testing.expectEqual(expected, parsed);
+}
+
 test "Parses 'go nodes' command" {
-    const parsed = try UciCommand.GuiToEngineCommand.fromString(&"go nodes 10000");
-    const expected = UciCommand.GuiToEngineCommand{
+    const parsed = try Uci.EngineCommand.fromString(&"go nodes 10000");
+    const expected = Uci.EngineCommand{
         .go = .{
             .searchmoves = null,
             .ponder = false,
@@ -896,9 +1007,16 @@ test "Parses 'go nodes' command" {
     try std.testing.expectEqual(expected, parsed);
 }
 
+test "'go nodes' command that provides non-integer value returns error" {
+    const parsed = Uci.EngineCommand.fromString(&"go nodes ten");
+    const Err = Uci.EngineCommand.ParseError;
+    const expected = Err.IntegerParseError;
+    try std.testing.expectEqual(expected, parsed);
+}
+
 test "Parses 'go mate' command" {
-    const parsed = try UciCommand.GuiToEngineCommand.fromString(&"go mate 3");
-    const expected = UciCommand.GuiToEngineCommand{
+    const parsed = try Uci.EngineCommand.fromString(&"go mate 3");
+    const expected = Uci.EngineCommand{
         .go = .{
             .searchmoves = null,
             .ponder = false,
@@ -917,9 +1035,16 @@ test "Parses 'go mate' command" {
     try std.testing.expectEqual(expected, parsed);
 }
 
+test "'go mate' command that provides non-integer value returns error" {
+    const parsed = Uci.EngineCommand.fromString(&"go mate 9thousand");
+    const Err = Uci.EngineCommand.ParseError;
+    const expected = Err.IntegerParseError;
+    try std.testing.expectEqual(expected, parsed);
+}
+
 test "Parses 'go movetime' command" {
-    const parsed = try UciCommand.GuiToEngineCommand.fromString(&"go movetime 1000");
-    const expected = UciCommand.GuiToEngineCommand{
+    const parsed = try Uci.EngineCommand.fromString(&"go movetime 1000");
+    const expected = Uci.EngineCommand{
         .go = .{
             .searchmoves = null,
             .ponder = false,
@@ -938,9 +1063,16 @@ test "Parses 'go movetime' command" {
     try std.testing.expectEqual(expected, parsed);
 }
 
+test "'go movetime' command that provides non-integer value returns error" {
+    const parsed = Uci.EngineCommand.fromString(&"go movetime 9thousand");
+    const Err = Uci.EngineCommand.ParseError;
+    const expected = Err.IntegerParseError;
+    try std.testing.expectEqual(expected, parsed);
+}
+
 test "Parses 'go infinite' command" {
-    const parsed = try UciCommand.GuiToEngineCommand.fromString(&"go infinite");
-    const expected = UciCommand.GuiToEngineCommand{
+    const parsed = try Uci.EngineCommand.fromString(&"go infinite");
+    const expected = Uci.EngineCommand{
         .go = .{
             .searchmoves = null,
             .ponder = false,
@@ -960,8 +1092,8 @@ test "Parses 'go infinite' command" {
 }
 
 test "Parses 'go' command with multiple parameters" {
-    const parsed = try UciCommand.GuiToEngineCommand.fromString(&"go wtime 5000 btime 4000 winc 100 binc 100 depth 8 infinite");
-    const expected = UciCommand.GuiToEngineCommand{
+    const parsed = try Uci.EngineCommand.fromString(&"go wtime 5000 btime 4000 winc 100 binc 100 depth 8 infinite");
+    const expected = Uci.EngineCommand{
         .go = .{
             .searchmoves = null,
             .ponder = false,
@@ -983,30 +1115,26 @@ test "Parses 'go' command with multiple parameters" {
 // TODO - Test `go searchmoves` when that is implemented
 
 test "Parses 'stop' command" {
-    try std.testing.expectEqual(.stop, try UciCommand.GuiToEngineCommand.fromString(&"stop"));
+    try std.testing.expectEqual(.stop, try Uci.EngineCommand.fromString(&"stop"));
 }
 
 test "Parses 'ponderhit' command" {
-    try std.testing.expectEqual(.ponderhit, try UciCommand.GuiToEngineCommand.fromString(&"ponderhit"));
+    try std.testing.expectEqual(.ponderhit, try Uci.EngineCommand.fromString(&"ponderhit"));
 }
 
 test "Parses 'quit' command" {
-    try std.testing.expectEqual(.quit, try UciCommand.GuiToEngineCommand.fromString(&"quit"));
+    try std.testing.expectEqual(.quit, try Uci.EngineCommand.fromString(&"quit"));
 }
 
 test "Omitting required subcommand returns an error" {
-    const Err = UciCommand.GuiToEngineCommand.CommandParseError;
-    const result = UciCommand.GuiToEngineCommand.fromString(&"setoption notname");
+    const Err = Uci.EngineCommand.ParseError;
+    const result = Uci.EngineCommand.fromString(&"setoption notname");
     try std.testing.expectEqual(Err.IllegalCommandState, result);
 }
 
 test "Input that doesn't match a command returns an error" {
-    const Err = UciCommand.GuiToEngineCommand.CommandParseError;
-    const result = UciCommand.GuiToEngineCommand.fromString(&"nothing");
+    const Err = Uci.EngineCommand.ParseError;
+    const result = Uci.EngineCommand.fromString(&"nothing");
     try std.testing.expectEqual(Err.NotACommand, result);
-}
-
-test "Failing to parse integers results returns an error" {
-
 }
 

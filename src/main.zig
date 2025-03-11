@@ -17,7 +17,8 @@ pub fn main() !void {
     // TODO - Poll on new input to stdin (wait for some amount of time between polls)
     //        On new input, parse it into command and respond accordingly
     while (true) {
-        const cmd: ?uci.UciCommand.GuiToEngineCommand = try interface.poll();
+        const cmd: ?uci.Uci.EngineCommand = try interface.poll();
+
         if (cmd == null) {
             continue;
         }
