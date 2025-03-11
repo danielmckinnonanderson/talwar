@@ -7,4 +7,5 @@ zig-out/
 /docgen_tmp/
 zig-cache/
 .DS_Store
+*.log
 
