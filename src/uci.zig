@@ -150,13 +150,17 @@ pub const Uci = enum {
                 }
 
                 const option_value = parts.next();
-                std.debug.assert(option_value != null);
+                if (option_value == null) {
+                    return ParseError.IllegalCommandState;
+                }
+
                 return EngineCommand{ .setoption = .{ .name = option_name.?, .value = option_value } };
 
             } else if (mem.eql(u8, first, "register")) {
                 const register_strategy = parts.next();
-                std.debug.assert(register_strategy != null);
-
+                if (register_strategy == null) {
+                    return ParseError.IllegalCommandState;
+                }
                 
                 if (mem.eql(u8, register_strategy.?, "later")) {
                     return EngineCommand{ .register = .later };
@@ -286,7 +290,9 @@ pub const Uci = enum {
 
                     } else if (mem.eql(u8, subcmd, "btime")) {
                         const value = parts.next();
-                        std.debug.assert(value != null);
+                        if (value == null) {
+                            return ParseError.IllegalCommandState;
+                        }
 
                         const parsed = std.fmt.parseUnsigned(u32, value.?, 10)
                             catch return ParseError.IntegerParseError;
@@ -294,7 +300,9 @@ pub const Uci = enum {
 
                     } else if (mem.eql(u8, subcmd, "winc")) {
                         const value = parts.next();
-                        std.debug.assert(value != null);
+                        if (value == null) {
+                            return ParseError.IllegalCommandState;
+                        }
 
                         const parsed = std.fmt.parseUnsigned(u32, value.?, 10)
                             catch return ParseError.IntegerParseError;
@@ -302,7 +310,9 @@ pub const Uci = enum {
 
                     } else if (mem.eql(u8, subcmd, "binc")) {
                         const value = parts.next();
-                        std.debug.assert(value != null);
+                        if (value == null) {
+                            return ParseError.IllegalCommandState;
+                        }
 
                         const parsed = std.fmt.parseUnsigned(u32, value.?, 10)
                             catch return ParseError.IntegerParseError;
@@ -311,7 +321,9 @@ pub const Uci = enum {
 
                     } else if (mem.eql(u8, subcmd, "movestogo")) {
                         const value = parts.next();
-                        std.debug.assert(value != null);
+                        if (value == null) {
+                            return ParseError.IllegalCommandState;
+                        }
 
                         const parsed = std.fmt.parseUnsigned(u8, value.?, 10)
                             catch return ParseError.IntegerParseError;
@@ -320,7 +332,9 @@ pub const Uci = enum {
 
                     } else if (mem.eql(u8, subcmd, "depth")) {
                         const value = parts.next();
-                        std.debug.assert(value != null);
+                        if (value == null) {
+                            return ParseError.IllegalCommandState;
+                        }
 
                         const parsed = std.fmt.parseUnsigned(u16, value.?, 10)
                             catch return ParseError.IntegerParseError;
@@ -328,7 +342,9 @@ pub const Uci = enum {
 
                     } else if (mem.eql(u8, subcmd, "nodes")) {
                         const value = parts.next();
-                        std.debug.assert(value != null);
+                        if (value == null) {
+                            return ParseError.IllegalCommandState;
+                        }
 
                         const parsed = std.fmt.parseUnsigned(u16, value.?, 10)
                             catch return ParseError.IntegerParseError;
@@ -336,7 +352,9 @@ pub const Uci = enum {
 
                     } else if (mem.eql(u8, subcmd, "mate")) {
                         const value = parts.next();
-                        std.debug.assert(value != null);
+                        if (value == null) {
+                            return ParseError.IllegalCommandState;
+                        }
 
                         const parsed = std.fmt.parseUnsigned(u16, value.?, 10)
                             catch return ParseError.IntegerParseError;
@@ -344,7 +362,9 @@ pub const Uci = enum {
 
                     } else if (mem.eql(u8, subcmd, "movetime")) {
                         const value = parts.next();
-                        std.debug.assert(value != null);
+                        if (value == null) {
+                            return ParseError.IllegalCommandState;
+                        }
 
                         const parsed = std.fmt.parseUnsigned(u32, value.?, 10)
                             catch return ParseError.IntegerParseError;
