@@ -397,8 +397,121 @@ fn attackedByRook(position: Board.PositionIndex, board: *const Board) u64 {
 }
 
 fn attackedByBishop(position: Board.PositionIndex, board: *const Board) u64 {
-    _ = board;
-    _ = position;
+    const pos_bit = @as(u64, 1) << position;
+    const occupied = getOccupied(board);
+
+    var moves: u64 = 0;
+
+    // top left
+    var current_pos = position;
+
+    if (!(pos_bit & Board.RANK_8 != 0 or pos_bit & Board.FILE_A != 0)) {
+        while (current_pos <= 62) {
+            current_pos += 7;
+            const current_bit = @as(u64, 1) << @intCast(current_pos);
+
+            moves |= current_bit;
+
+            if ((occupied & current_bit) != 0) {
+                break;
+            }
+
+            // Prevent integer overflow
+            if ((current_bit & Board.RANK_8) != 0 or (current_bit & Board.FILE_A) != 0) {
+                break;
+            }
+        }
+    }
+
+    // top right
+    current_pos = position;
+
+    if (!(pos_bit & Board.RANK_8 != 0 or pos_bit & Board.FILE_H != 0)) {
+        while (current_pos <= 63) {
+            current_pos += 9;
+            const current_bit = @as(u64, 1) << @intCast(current_pos);
+            
+            moves |= current_bit;
+            
+            if ((occupied & current_bit) != 0) {
+                break;
+            }
+
+            // Prevent integer overflow
+            if ((current_bit & Board.RANK_8) != 0 or (current_bit & Board.FILE_H) != 0) {
+                break;
+            }
+        }
+    }
+
+    // Bottom-right
+    current_pos = position;
+
+    if (!(pos_bit & Board.RANK_1 != 0 or pos_bit & Board.FILE_H != 0)) {
+        while (current_pos >= 1) {
+            current_pos -= 7;
+            const current_bit = @as(u64, 1) << @intCast(current_pos);
+            
+            moves |= current_bit;
+            
+            if ((occupied & current_bit) != 0) {
+                break;
+            }
+
+            // Prevent integer underflow
+            if ((current_bit & Board.RANK_1) != 0 or (current_bit & Board.FILE_H) != 0) {
+                break;
+            }
+        }
+    }
+    
+    // Bottom-left
+    current_pos = position;
+
+    if (!(pos_bit & Board.RANK_1 != 0 or pos_bit & Board.FILE_A != 0)) {
+        while (current_pos >= 0) {
+            current_pos -= 9;
+            const current_bit = @as(u64, 1) << @intCast(current_pos);
+            
+            moves |= current_bit;
+            
+            if ((occupied & current_bit) != 0) {
+                break;
+            }
+
+            // Prevent integer underflow
+            if ((current_bit & Board.RANK_1) != 0 or (current_bit & Board.FILE_A) != 0) {
+                break;
+            }
+        }
+    }
+
+    return moves;
+}
+
+fn attackedByBishops(bishop_positions: u64, board: *const Board) u64 {
+    var attacked_squares: u64 = 0;
+    var remaining_positions = bishop_positions;
+
+    while (remaining_positions != 0) {
+        const lsb = remaining_positions & (~remaining_positions + 1);
+        // Count trailing zeros gives us the position
+        const position = @ctz(lsb);
+        const attacks_from_position = attackedByBishop(@intCast(position), board);
+        attacked_squares |= attacks_from_position;
+
+        remaining_positions &= ~lsb;
+    }
+
+    return attacked_squares;
+}
+
+fn attackedByQueen(position: Board.PositionIndex, board: *const Board) u64 {
+    return attackedByBishop(position, board) | attackedByRook(position, board);
+}
+
+fn attackedByQueens(queen_positions: u64, board: *const Board) u64 {
+    return attackedByBishops(queen_positions, board) | attackedByRook(queen_positions, board);
 }
 
 // All piece movements should perform the following steps to end up
@@ -583,9 +696,7 @@ pub fn getBishopMoves(position: Board.PositionIndex, board: *const Board) u64 {
     // Top-left direction
     var current_pos = position;
 
-    if (pos_bit & Board.RANK_8 != 0 or pos_bit & Board.FILE_A != 0) {
-        // can't go any further in this direction
-    } else {
+    if (!(pos_bit & Board.RANK_8 != 0 or pos_bit & Board.FILE_A != 0)) {
         while (current_pos <= 62) {
             current_pos += 7;
             const current_bit = @as(u64, 1) << @intCast(current_pos);
@@ -612,9 +723,7 @@ pub fn getBishopMoves(position: Board.PositionIndex, board: *const Board) u64 {
     // Top-right direction
     current_pos = position;
 
-    if (pos_bit & Board.RANK_8 != 0 or pos_bit & Board.FILE_H != 0) {
-        // can't go any further
-    } else {
+    if (!(pos_bit & Board.RANK_8 != 0 or pos_bit & Board.FILE_H != 0)) {
         while (current_pos <= 63) {
             current_pos += 9;
             const current_bit = @as(u64, 1) << @intCast(current_pos);
@@ -639,9 +748,7 @@ pub fn getBishopMoves(position: Board.PositionIndex, board: *const Board) u64 {
     // Bottom-right direction
     current_pos = position;
 
-    if (pos_bit & Board.RANK_1 != 0 or pos_bit & Board.FILE_H != 0) {
-        // can't go any further
-    } else {
+    if (!(pos_bit & Board.RANK_1 != 0 or pos_bit & Board.FILE_H != 0)) {
         while (current_pos >= 1) {
             current_pos -= 7;
             const current_bit = @as(u64, 1) << @intCast(current_pos);
@@ -666,9 +773,7 @@ pub fn getBishopMoves(position: Board.PositionIndex, board: *const Board) u64 {
     // Bottom-left direction
     current_pos = position;
 
-    if (pos_bit & Board.RANK_1 != 0 or pos_bit & Board.FILE_A != 0) {
-        // can't go any further
-    } else {
+    if (!(pos_bit & Board.RANK_1 != 0 or pos_bit & Board.FILE_A != 0)) {
         while (current_pos >= 0) {
             current_pos -= 9;
             const current_bit = @as(u64, 1) << @intCast(current_pos);
@@ -1331,5 +1436,93 @@ test "Get attacked squares for multiple rooks produces accurate bitboard" {
 
     const aggregate = first | second | third | fourth;
     try std.testing.expectEqual(result, aggregate);
+}
+
+test "Get attacked squares for bishops produces accurate bitboard" {
+    var board = Board.empty();
+
+    board.bishops |= comptime Position.intoBitboard(&[_]Position{ .E5 });
+    board.white   |= comptime Position.intoBitboard(&[_]Position{ .E5 });
+
+    // Set up some pieces both friendly and foe
+    board.knights |= comptime Position.intoBitboard(&[_]Position{ .C3 });
+    board.black   |= comptime Position.intoBitboard(&[_]Position{ .C3 });
+
+    board.kings |= comptime Position.intoBitboard(&[_]Position{ .B8 });
+    board.black |= comptime Position.intoBitboard(&[_]Position{ .B8 });
+
+    board.queens |= comptime Position.intoBitboard(&[_]Position{ .F4 });
+    board.white  |= comptime Position.intoBitboard(&[_]Position{ .F4 });
+
+    const result = attackedByBishop(comptime Position.intoIndex(.E5), &board);
+
+    const expected = comptime Position.intoBitboard(
+        &[_]Position{ .B8, .C3, .C7, .D4, .D6,
+                      .F4, .F6, .G7, .H8 });
+
+    try std.testing.expectEqual(expected, result);
+}
+
+test "Get attacked squares for multiple bishops produces accurate bitboard" {
+    var board = Board.empty();
+
+    board.bishops |= comptime Position.intoBitboard(&[_]Position{ .A3, .C5, .E7, .G5 });
+    board.white   |= comptime Position.intoBitboard(&[_]Position{ .A3, .C5, .E7, .G5 });
+
+    board.queens |= comptime Position.intoBitboard(&[_]Position{ .B6 });
+    board.black  |= comptime Position.intoBitboard(&[_]Position{ .B6 });
+    board.rooks  |= comptime Position.intoBitboard(&[_]Position{ .E3 });
+    board.black  |= comptime Position.intoBitboard(&[_]Position{ .E3 });
+
+    const expected = comptime Position.intoBitboard(
+        &[_]Position{ .B2, .B4, .C1, .C5,
+                      .B6, .B4, .D4, .D6, .A3, .E3, .E7,
+                      .D6, .D8, .C5, .F8, .F6, .G5,
+                      .E7, .E3, .F6, .F4, .H6, .H4, });
+
+    const result = attackedByBishops(board.bishops & board.white, &board);
+
+    try std.testing.expectEqual(expected, result);
+
+    // To be extra sure, check each bishop attack pattern individually and make sure that
+    // the result is the union of all individual sets
+    const first  = attackedByBishop(comptime Position.intoIndex(.A3), &board);
+    const second = attackedByBishop(comptime Position.intoIndex(.C5), &board);
+    const third  = attackedByBishop(comptime Position.intoIndex(.E7), &board);
+    const fourth = attackedByBishop(comptime Position.intoIndex(.G5), &board);
+
+    const aggregate = first | second | third | fourth;
+    try std.testing.expectEqual(result, aggregate);
+}
+
+test "Get attacked squares for queen produces accurate bitboard" {
+    var board = Board.empty();
+
+    board.queens |= comptime Position.intoBitboard(&[_]Position{ .D3 });
+    board.white  |= comptime Position.intoBitboard(&[_]Position{ .D3 });
+
+    // Set up some pieces both friendly and foe
+    board.kings |= comptime Position.intoBitboard(&[_]Position{ .F3 });
+    board.black |= comptime Position.intoBitboard(&[_]Position{ .F3 });
+
+    board.bishops |= comptime Position.intoBitboard(&[_]Position{ .G6 });
+    board.white   |= comptime Position.intoBitboard(&[_]Position{ .G6 });
+
+    const result = attackedByQueen(comptime Position.intoIndex(.D3), &board);
+
+    // We expect the attacked squares to extend out from the queen's position,
+    // inclusive to the terminal square. Terminal square includes the position
+    // of the piece that we "hit", even if that piece is friendly.
+    const expected = comptime Position.intoBitboard(
+        &[_]Position{ .A3, .B3, .C3, .E3, .F3,
+                      .B1, .C2, .A6, .B5, .C4,
+                      .D1, .D2, .D4, .D5, .D6, .D7, .D8,
+                      .E4, .F5, .G6, .E2, .F1 });
+
+    try std.testing.expectEqual(expected, result);
+}
+
+test "Get attacked squares for multiple queens produces accurate bitboard" {
+
 }
 
