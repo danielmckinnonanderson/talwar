@@ -511,7 +511,7 @@ fn attackedByQueen(position: Board.PositionIndex, board: *const Board) u64 {
 }
 
 fn attackedByQueens(queen_positions: u64, board: *const Board) u64 {
-    return attackedByBishops(queen_positions, board) | attackedByRook(queen_positions, board);
+    return attackedByBishops(queen_positions, board) | attackedByRooks(queen_positions, board);
 }
 
 // All piece movements should perform the following steps to end up
@@ -1523,6 +1523,29 @@ test "Get attacked squares for queen produces accurate bitboard" {
 }
 
 test "Get attacked squares for multiple queens produces accurate bitboard" {
+    var board = Board.empty();
 
+    board.queens |= comptime Position.intoBitboard(&[_]Position{ .A3, .G3, .C5, .C7 });
+    board.black  |= comptime Position.intoBitboard(&[_]Position{ .A3, .G3, .C5, .C7 });
+
+    board.kings |= comptime Position.intoBitboard(&[_]Position{ .C3, .E3 });
+    board.white |= comptime Position.intoBitboard(&[_]Position{ .C3, .E3 });
+
+    board.rooks |= comptime Position.intoBitboard(&[_]Position{ .E7, .G7 });
+    board.white |= comptime Position.intoBitboard(&[_]Position{ .E7, .G7 });
+
+    const result = attackedByQueens(board.queens & board.black, &board);
+
+    const expected = comptime Position.intoBitboard(
+        &[_]Position{ .A1, .A2, .A3, .A4, .A5, .A6, .A7, .A8,
+                      .B2, .B3, .B4, .B5, .B6, .B7, .B8,
+                      .C1, .C3, .C4, .C5, .C6, .C7, .C8,
+                      .D4, .D5, .D6, .D7, .D8,
+                      .E1, .E3, .E5, .E7,
+                      .F2, .F3, .F4, .F5,
+                      .G1, .G2, .G3, .G4, .G5, .G6, .G7,
+                      .H2, .H3, .H4, .H5 });
+
+    try std.testing.expectEqual(expected, result);
 }
 
