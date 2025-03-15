@@ -96,17 +96,21 @@ pub const Board = struct {
     }
 
     pub fn init() Board {
-        return Board {
+        var board = Board {
             .white   = comptime Position.intoBitboard(
                         &[_]Position{ .A1, .B1, .C1, .D1, .E1, .F1, .G1, .H1,
                                       .A2, .B2, .C2, .D2, .E2, .F2, .G2, .H2 }),
+            .attacked_by_white = comptime Position.intoBitboard(
+                        &[_]Position{ .B1, .C1, .D1, .E1, .F1, .G1,
+                                      .A2, .B2, .C2, .D2, .E2, .F2, .G2, .H2,
+                                      .A3, .B3, .C3, .D3, .E3, .F3, .G3, .H3, }),
             .black   = comptime Position.intoBitboard(
                         &[_]Position{ .A7, .B7, .C7, .D7, .E7, .F7, .G7, .H7,
                                       .A8, .B8, .C8, .D8, .E8, .F8, .G8, .H8 }),
-            .attacked_by_white = comptime Position.intoBitboard(
-                        &[_]Position{ .A3, .B3, .C3, .D3, .E3, .F3, .G3, .H3 }),
             .attacked_by_black = comptime Position.intoBitboard(
-                        &[_]Position{ .A6, .B6, .C6, .D6, .E6, .F6, .G6, .H6 }),
+                        &[_]Position{ .B8, .C8, .D8, .E8, .F8, .G8,
+                                      .A7, .B7, .C7, .D7, .E7, .F7, .G7, .H7,
+                                      .A6, .B6, .C6, .D6, .E6, .F6, .G6, .H6, }),
             .pawns   = comptime Position.intoBitboard(
                         &[_]Position{ .A2, .B2, .C2, .D2, .E2, .F2, .G2, .H2,
                                       .A7, .B7, .C7, .D7, .E7, .F7, .G7, .H7 }),
@@ -116,7 +120,44 @@ pub const Board = struct {
             .queens  = comptime Position.intoBitboard(&[_]Position{ .D1, .D8 }),
             .kings   = comptime Position.intoBitboard(&[_]Position{ .E1, .E8 }),
         };
+
+        board.attacked_by_white = getAttacking(.white, &board);
+        board.attacked_by_black = getAttacking(.black, &board);
+
+        return board;
     }
+
+    /// Place a piece at an empty space.
+    /// If the space is occupied, raises `PlacementError.PositionOccupied`.
+    pub fn setPieceAt(
+        self: *Board,
+        piece: Piece,
+        color: PieceColor,
+        position: Position,
+    ) PlacementError!void {
+        const pos_bit = @as(u64, 1) << Position.intoIndex(position);
+        const occupied = getOccupied(self);
+
+        if ((occupied & pos_bit) != 0) {
+            return PlacementError.PositionOccupied;
+        }
+
+        if (color == .black) {
+            self.black |= pos_bit;
+        } else {
+            self.white |= pos_bit;
+        }
+
+        switch (piece) {
+            .pawn   => self.pawns   |= pos_bit,
+            .knight => self.knights |= pos_bit,
+            .bishop => self.bishops |= pos_bit,
+            .rook   => self.rooks   |= pos_bit,
+            .queen  => self.queens  |= pos_bit,
+            .king   => self.kings   |= pos_bit,
+        }
+    }
+
 
     /// Implements the format interface for the board as whole, writing the
     /// pieces / colors to a visual representation
@@ -216,36 +257,6 @@ pub const Board = struct {
 
 const PlacementError = error{ PositionOccupied };
 
-/// Place a piece at an empty space.
-/// If the space is occupied, raises `PlacementError.PositionOccupied`.
-pub fn placePiece(
-    board: *Board,
-    piece: Piece,
-    color: PieceColor,
-    position: Board.PositionIndex
-) PlacementError!void {
-    const pos_bit = @as(u64, 1) << position;
-    const occupied = getOccupied(board);
-
-    if ((occupied & pos_bit) != 0) {
-        return PlacementError.PositionOccupied;
-    }
-
-    if (color == .black) {
-        board.black |= pos_bit;
-    } else {
-        board.white |= pos_bit;
-    }
-
-    switch (piece) {
-        .pawn   => board.pawns   |= pos_bit,
-        .knight => board.knights |= pos_bit,
-        .bishop => board.bishops |= pos_bit,
-        .rook   => board.rooks   |= pos_bit,
-        .queen  => board.queens  |= pos_bit,
-        .king   => board.kings   |= pos_bit,
-    }
-}
 
 pub inline fn getOccupied(board: *const Board) u64 {
     return board.white | board.black;
@@ -489,6 +500,57 @@ fn attackedByBishop(position: Board.PositionIndex, board: *const Board) u64 {
     return moves;
 }
 
+fn attackedByKnight(position: Board.PositionIndex, board: *const Board) u64 {
+    const pos_bit: u64 = @as(u64, 1) << position;
+
+    const occupied = getOccupied(board);
+
+    // Rather than return an error, let's just say this state is completely illegal and crash.
+    std.debug.assert((occupied & pos_bit) != 0);
+
+    const not_a_file  = ~Board.FILE_A;
+    const not_ab_file = ~(Board.FILE_A | Board.FILE_B);
+    const not_h_file  = ~Board.FILE_H;
+    const not_gh_file = ~(Board.FILE_G | Board.FILE_H);
+
+    var moves: u64 = 0;
+
+    // North movements (up 2, then left or right 1)
+    moves |= (pos_bit << 15) & not_h_file;
+    moves |= (pos_bit << 17) & not_a_file;
+
+    // South movements (down 2, then left or right 1)
+    moves |= (pos_bit >> 15) & not_a_file;
+    moves |= (pos_bit >> 17) & not_h_file;
+
+    // East movements (right 2, then up or down 1)
+    moves |= (pos_bit << 10) & not_ab_file;
+    moves |= (pos_bit >>  6) & not_ab_file;
+
+    // West movements (left 2, then up or down 1)
+    moves |= (pos_bit <<  6) & not_gh_file;
+    moves |= (pos_bit >> 10) & not_gh_file;
+
+    return moves;
+}
+
+fn attackedByKnights(knight_positions: u64, board: *const Board) u64 {
+    var attacked_squares: u64 = 0;
+    var remaining_positions = knight_positions;
+
+    while (remaining_positions != 0) {
+        const lsb = remaining_positions & (~remaining_positions + 1);
+        // Count trailing zeros gives us the position
+        const position = @ctz(lsb);
+        const attacks_from_position = attackedByKnight(@intCast(position), board);
+        attacked_squares |= attacks_from_position;
+
+        remaining_positions &= ~lsb;
+    }
+
+    return attacked_squares;
+}
+
 fn attackedByBishops(bishop_positions: u64, board: *const Board) u64 {
     var attacked_squares: u64 = 0;
     var remaining_positions = bishop_positions;
@@ -513,6 +575,68 @@ fn attackedByQueen(position: Board.PositionIndex, board: *const Board) u64 {
 fn attackedByQueens(queen_positions: u64, board: *const Board) u64 {
     return attackedByBishops(queen_positions, board) | attackedByRooks(queen_positions, board);
 }
+
+fn attackedByKing(position: Board.PositionIndex, board: *const Board) u64 {
+    const king_bitboard: u64 = @as(u64, 1) << position;
+    const occupied = getOccupied(board);
+
+    // There better be a king here.
+    std.debug.assert(occupied & king_bitboard != 0);
+
+    // Prevent wrapping around the board
+    const not_a_file = ~Board.FILE_A;
+    const not_h_file = ~Board.FILE_H;
+
+    var moves: u64 = 0;
+
+    // North, North-East, East
+    moves |= (king_bitboard << 8);
+    moves |= (king_bitboard << 9) & not_a_file;
+    moves |= (king_bitboard << 1) & not_a_file;
+
+    // South-East, South, South-West
+    moves |= (king_bitboard >> 7) & not_a_file;
+    moves |= (king_bitboard >> 8);
+    moves |= (king_bitboard >> 9) & not_h_file;
+
+    // West, North-West
+    moves |= (king_bitboard >> 1) & not_h_file;
+    moves |= (king_bitboard << 7) & not_h_file;
+
+
+    return moves;
+}
+
+fn attackedByKings(king_positions: u64, board: *const Board) u64 {
+    var attacked_squares: u64 = 0;
+    var remaining_positions = king_positions;
+
+    while (remaining_positions != 0) {
+        const lsb = remaining_positions & (~remaining_positions + 1);
+        // Count trailing zeros gives us the position
+        const position = @ctz(lsb);
+        const attacks_from_position = attackedByKing(@intCast(position), board);
+        attacked_squares |= attacks_from_position;
+
+        remaining_positions &= ~lsb;
+    }
+
+    return attacked_squares;
+}
+
+pub fn getAttacking(color: PieceColor, board: *const Board) u64 {
+    const team = if (color == .white) board.white else board.black;
+
+    const kings   = attackedByKings(team & board.kings, board);
+    const queens  = attackedByQueens(team & board.queens, board);
+    const rooks   = attackedByRooks(team & board.rooks, board);
+    const bishops = attackedByBishops(team & board.bishops, board);
+    const knights = attackedByKnights(team & board.knights, board);
+    const pawns   = attackedByPawns(team & board.pawns, color);
+
+    return kings | queens | rooks | bishops | knights | pawns;
+}
+
 
 // All piece movements should perform the following steps to end up
 // with a u64 representing all legal moves:
@@ -1322,18 +1446,18 @@ test "Kings can which are boxed in by friendly pieces cannot move" {
     try std.testing.expectEqual(0, moves);
 }
 
-test "Placing piece on an occupied space raises an error" {
+test "Setting piece on an occupied space raises an error" {
     var board = Board.empty();
-    const pos: Board.PositionIndex = 42;
+    const pos = .C6;
 
     // Make the position occupied
-    board.black |= (@as(u64, 1) << pos);
-    board.kings |= (@as(u64, 1) << pos);
+    board.black |= (@as(u64, 1) << comptime Position.intoIndex(pos));
+    board.kings |= (@as(u64, 1) << comptime Position.intoIndex(pos));
 
     // This should now raise an error because the pos is occupied
     try std.testing.expectError(
         PlacementError.PositionOccupied,
-        placePiece(&board, Piece.pawn, PieceColor.white, pos));
+        board.setPieceAt(Piece.pawn, PieceColor.white, pos));
 
     // White & pawns should both still be empty since we bailed
     try std.testing.expectEqual(0, board.pawns);
@@ -1342,12 +1466,12 @@ test "Placing piece on an occupied space raises an error" {
 
 test "Placing piece on an empty space updates the bit-board representations" {
     var board = Board.empty();
-    const pos: Board.PositionIndex = 42;
+    const pos = .C6;
 
     try std.testing.expectEqual(0, board.black);
     try std.testing.expectEqual(0, board.queens);
 
-    try placePiece(&board, Piece.queen, PieceColor.black, pos);
+    try board.setPieceAt(Piece.queen, PieceColor.black, pos);
 
     try std.testing.expectEqual(4398046511104, board.black);
     try std.testing.expectEqual(4398046511104, board.queens);
@@ -1547,5 +1671,90 @@ test "Get attacked squares for multiple queens produces accurate bitboard" {
                       .H2, .H3, .H4, .H5 });
 
     try std.testing.expectEqual(expected, result);
+}
+
+test "Get attacked squares for king produces accurate bitboard" {
+    var board = Board.empty();
+
+    board.kings |= comptime Position.intoBitboard(&[_]Position{ .C8 });
+    board.white |= comptime Position.intoBitboard(&[_]Position{ .C8 });
+
+    board.pawns |= comptime Position.intoBitboard(&[_]Position{ .C7, .D8 });
+    board.black |= comptime Position.intoBitboard(&[_]Position{ .C7, .D8 });
+
+    const result = attackedByKing(comptime Position.intoIndex(.C8), &board);
+
+    const expected = comptime Position.intoBitboard(
+        &[_]Position{ .B8, .B7, .C7, .D7, .D8 });
+
+    try std.testing.expectEqual(expected, result);
+}
+
+
+test "Get attacked squares for multiple kings produces accurate bitboard" {
+    var board = Board.empty();
+
+    board.kings |= comptime Position.intoBitboard(&[_]Position{ .A5, .H3, .D2 });
+    board.white |= comptime Position.intoBitboard(&[_]Position{ .A5, .H3, .D2 });
+
+    board.pawns |= comptime Position.intoBitboard(&[_]Position{ .B5, .E3, .G3, .H2 });
+    board.black |= comptime Position.intoBitboard(&[_]Position{ .B5, .E3, .G3, .H2 });
+
+    const result = attackedByKings(board.kings & board.white, &board);
+
+    const expected = comptime Position.intoBitboard(
+        &[_]Position{ .A4, .A6, .B4, .B5, .B6, .C1, .C2, .C3, .D1, .D3,
+                      .E1, .E2, .E3, .G2, .G3, .G4, .H2, .H4 });
+
+    try std.testing.expectEqual(expected, result);
+}
+
+test "Get attacked squares for knight produces accurate bitboard" {
+    var board = Board.empty();
+
+    board.knights |= comptime Position.intoBitboard(&[_]Position{ .C2 });
+    board.white   |= comptime Position.intoBitboard(&[_]Position{ .C2 });
+
+    board.rooks |= comptime Position.intoBitboard(&[_]Position{ .A1, .D4, .E3 });
+    board.black |= comptime Position.intoBitboard(&[_]Position{ .A1, .D4, .E3 });
+
+    const result = attackedByKnight(comptime Position.intoIndex(.C2), &board);
+
+    const expected = comptime Position.intoBitboard(&[_]Position{ .A1, .A3, .B4, .D4, .E3, .E1 });
+
+    try std.testing.expectEqual(expected, result);
+}
+
+
+test "Get attacked squares for multiple knights produces accurate bitboard" {
+    var board = Board.empty();
+
+    board.knights |= comptime Position.intoBitboard(&[_]Position{ .C2, .E6, .B7 });
+    board.white   |= comptime Position.intoBitboard(&[_]Position{ .C2, .E6, .B7 });
+
+    board.rooks |= comptime Position.intoBitboard(&[_]Position{ .A1, .D4, .E3, .F8 });
+    board.black |= comptime Position.intoBitboard(&[_]Position{ .A1, .D4, .E3, .F8 });
+
+    const result = attackedByKnights(board.knights & board.white, &board);
+
+    const expected = comptime Position.intoBitboard(
+        &[_]Position{ .A1, .A3, .A5, .B4, .C5, .C7, .D4,
+                      .D6, .D8, .E3, .E1, .F4, .F8, .G5, .G7 });
+
+    try std.testing.expectEqual(expected, result);
+}
+
+test "Get attacked squares for entire team produces accurate bitboard" {
+    {
+        const board = Board.init();
+
+        const result = getAttacking(.white, &board);
+        const expected = Board.RANK_1 & ~(Board.FILE_A & Board.RANK_1)
+                                     & ~(Board.FILE_H & Board.RANK_1)
+                                     | Board.RANK_2
+                                     | Board.RANK_3;
+
+        try std.testing.expectEqual(expected, result);
+    }
 }
 
