@@ -126,10 +126,18 @@ pub const Board = struct {
             .kings   = comptime Position.intoBitboard(&[_]Position{ .E1, .E8 }),
         };
 
-        board.attacked_by_white = getAttacking(.white, &board);
-        board.attacked_by_black = getAttacking(.black, &board);
+        board.attacked_by_white = attackMask(.white, &board);
+        board.attacked_by_black = attackMask(.black, &board);
 
         return board;
+    }
+
+    pub inline fn occupied(self: *const Board) u64 {
+        return self.white | self.black;
+    }
+
+    pub inline fn unoccupied(self: *const Board) u64 {
+        return ~(self.white | self.black);
     }
 
     pub const GetPieceError = error { PositionUnoccupied };
@@ -185,10 +193,10 @@ pub const Board = struct {
 
         if (color == .black) {
             self.black |= pos_bit;
-            self.attacked_by_black = getAttacking(.black, self);
+            self.attacked_by_black = attackMask(.black, self);
         } else {
             self.white |= pos_bit;
-            self.attacked_by_white = getAttacking(.white, self);
+            self.attacked_by_white = attackMask(.white, self);
         }
     }
 
@@ -216,8 +224,8 @@ pub const Board = struct {
             .king   => self.kings   &= ~pos_bits,
         }
 
-        self.attacked_by_white = getAttacking(.white, self);
-        self.attacked_by_black = getAttacking(.black, self);
+        self.attacked_by_white = attackMask(.white, self);
+        self.attacked_by_black = attackMask(.black, self);
     }
 
     pub const ApplyMoveError = error {
@@ -226,6 +234,7 @@ pub const Board = struct {
         MoveIntoCheck
     };
 
+    // TODO - Account for castling
     pub fn applyMove(self: *Board, from: Position, to: Position) ApplyMoveError!void {
         const piece_info: PieceInfo = self.getPieceAt(from) catch {
             return ApplyMoveError.OriginUnoccupied;
@@ -235,12 +244,12 @@ pub const Board = struct {
         const dest_bits = Position.intoBitboard(&[1]Position{ to });
 
         const moves = switch (piece_info.piece) {
-            .pawn   => getPawnMoves(origin_idx, self),
-            .knight => getKnightMoves(origin_idx, self),
-            .bishop => getBishopMoves(origin_idx, self),
-            .rook   => getRookMoves(origin_idx, self),
-            .queen  => getQueenMoves(origin_idx, self),
-            .king   => getKingMoves(origin_idx, self),
+            .pawn   => pawnMovementMask(origin_idx, self),
+            .knight => knightMovementMask(origin_idx, self),
+            .bishop => bishopMovementMask(origin_idx, self),
+            .rook   => rookMovementMask(origin_idx, self),
+            .queen  => queenMovementMask(origin_idx, self),
+            .king   => kingMovementMask(origin_idx, self),
         };
 
         // If we have nowhere to move to before we even begin filtering,
@@ -376,18 +385,10 @@ pub const Board = struct {
         stdout.writeAll("  +-----------------+\n") catch {};
         stdout.writeAll("    A B C D E F G H  \n") catch {};
     }
+
 };
 
 const PlacementError = error{ PositionOccupied };
-
-
-pub inline fn getOccupied(board: *const Board) u64 {
-    return board.white | board.black;
-}
-
-pub inline fn getUnoccupied(board: *const Board) u64 {
-    return ~(board.white | board.black);
-}
 
 fn attackedByPawns(pawn_positions: u64, color: PieceColor) u64 {
     var attacked_squares: u64 = 0;
@@ -465,9 +466,8 @@ fn attackedByRooks(rook_positions: u64, board: *const Board) u64 {
 
 fn attackedByRook(position: Board.PositionIndex, board: *const Board) u64 {
     const pos_bit = @as(u64, 1) << position;
-    const occupied = getOccupied(board);
 
-    std.debug.assert((occupied & pos_bit) != 0);
+    std.debug.assert((board.occupied() & pos_bit) != 0);
 
     var attacking: u64 = 0;
 
@@ -482,7 +482,7 @@ fn attackedByRook(position: Board.PositionIndex, board: *const Board) u64 {
 
         attacking |= current_bit;
 
-        if ((occupied & current_bit) != 0) {
+        if ((board.occupied() & current_bit) != 0) {
             break;
         }
     }
@@ -495,7 +495,7 @@ fn attackedByRook(position: Board.PositionIndex, board: *const Board) u64 {
 
         attacking |= current_bit;
 
-        if ((occupied & current_bit) != 0) {
+        if ((board.occupied() & current_bit) != 0) {
             break;
         }
     }
@@ -509,7 +509,7 @@ fn attackedByRook(position: Board.PositionIndex, board: *const Board) u64 {
 
         attacking |= current_bit;
 
-        if ((occupied & current_bit) != 0) {
+        if ((board.occupied() & current_bit) != 0) {
             break;
         }
     }
@@ -522,7 +522,7 @@ fn attackedByRook(position: Board.PositionIndex, board: *const Board) u64 {
 
         attacking |= current_bit;
 
-        if ((occupied & current_bit) != 0) {
+        if ((board.occupied() & current_bit) != 0) {
             break;
         }
     }
@@ -532,8 +532,6 @@ fn attackedByRook(position: Board.PositionIndex, board: *const Board) u64 {
 
 fn attackedByBishop(position: Board.PositionIndex, board: *const Board) u64 {
     const pos_bit = @as(u64, 1) << position;
-    const occupied = getOccupied(board);
-
     var moves: u64 = 0;
 
     // top left
@@ -546,7 +544,7 @@ fn attackedByBishop(position: Board.PositionIndex, board: *const Board) u64 {
 
             moves |= current_bit;
 
-            if ((occupied & current_bit) != 0) {
+            if ((board.occupied() & current_bit) != 0) {
                 break;
             }
 
@@ -567,7 +565,7 @@ fn attackedByBishop(position: Board.PositionIndex, board: *const Board) u64 {
             
             moves |= current_bit;
             
-            if ((occupied & current_bit) != 0) {
+            if ((board.occupied() & current_bit) != 0) {
                 break;
             }
 
@@ -588,7 +586,7 @@ fn attackedByBishop(position: Board.PositionIndex, board: *const Board) u64 {
             
             moves |= current_bit;
             
-            if ((occupied & current_bit) != 0) {
+            if ((board.occupied() & current_bit) != 0) {
                 break;
             }
 
@@ -609,7 +607,7 @@ fn attackedByBishop(position: Board.PositionIndex, board: *const Board) u64 {
             
             moves |= current_bit;
             
-            if ((occupied & current_bit) != 0) {
+            if ((board.occupied() & current_bit) != 0) {
                 break;
             }
 
@@ -626,10 +624,8 @@ fn attackedByBishop(position: Board.PositionIndex, board: *const Board) u64 {
 fn attackedByKnight(position: Board.PositionIndex, board: *const Board) u64 {
     const pos_bit: u64 = @as(u64, 1) << position;
 
-    const occupied = getOccupied(board);
-
     // Rather than return an error, let's just say this state is completely illegal and crash.
-    std.debug.assert((occupied & pos_bit) != 0);
+    std.debug.assert((board.occupied() & pos_bit) != 0);
 
     const not_a_file  = ~Board.FILE_A;
     const not_ab_file = ~(Board.FILE_A | Board.FILE_B);
@@ -701,10 +697,9 @@ fn attackedByQueens(queen_positions: u64, board: *const Board) u64 {
 
 fn attackedByKing(position: Board.PositionIndex, board: *const Board) u64 {
     const king_bitboard: u64 = @as(u64, 1) << position;
-    const occupied = getOccupied(board);
 
     // There better be a king here.
-    std.debug.assert(occupied & king_bitboard != 0);
+    std.debug.assert(board.occupied() & king_bitboard != 0);
 
     // Prevent wrapping around the board
     const not_a_file = ~Board.FILE_A;
@@ -747,7 +742,7 @@ fn attackedByKings(king_positions: u64, board: *const Board) u64 {
     return attacked_squares;
 }
 
-pub fn getAttacking(color: PieceColor, board: *const Board) u64 {
+pub fn attackMask(color: PieceColor, board: *const Board) u64 {
     const team = if (color == .white) board.white else board.black;
 
     const kings   = attackedByKings(team & board.kings, board);
@@ -761,29 +756,13 @@ pub fn getAttacking(color: PieceColor, board: *const Board) u64 {
 }
 
 
-// All piece movements should perform the following steps to end up
-// with a u64 representing all legal moves:
-//
-// 1. Determine if there is actually a piece at the specified position
-//    of the correct type. If there is not, raise an error.
-// 2. Filter the boards by path type for the piece type in the specified position.
-// 3. Continue filtering, now removing spaces occupied by friendly pieces, and stopping
-//    pieces which move in a path at the first capture they encounter. Additionally
-//    prevent capturing the king at this step.
-// 
-// TODO - Account for moving into / out of check here.
-// TODO - Account for moves which require "move history", like en passant and castling.
-// TODO - Account for "pinned" pieces, ie pieces that actually cannot move because their
-//        moving would leave their king in check.
-
-
-pub fn getPawnMoves(position: Board.PositionIndex, board: *const Board) u64 {
-    const occupied = getOccupied(board);
+// TODO - Account for en passant
+pub fn pawnMovementMask(position: Board.PositionIndex, board: *const Board) u64 {
     const pos_bit: u64 = @as(u64, 1) << position;
 
     var moves: u64 = 0;
 
-    std.debug.assert((occupied & pos_bit) != 0);
+    std.debug.assert((board.occupied() & pos_bit) != 0);
 
     const color: PieceColor = if ((board.white & pos_bit) != 0)
         PieceColor.white
@@ -810,7 +789,7 @@ pub fn getPawnMoves(position: Board.PositionIndex, board: *const Board) u64 {
         position - 8;
 
     const one_fwd_pos = @as(u64, 1) << one_fwd_sq;
-    const can_move_fwd: bool = ~occupied & one_fwd_pos != 0;
+    const can_move_fwd: bool = board.unoccupied() & one_fwd_pos != 0;
 
     // We can make this move so long as the square is also unoccupied.
     if (can_move_fwd) {
@@ -829,7 +808,7 @@ pub fn getPawnMoves(position: Board.PositionIndex, board: *const Board) u64 {
         const two_fwd_sq = if (color == .white) position + 16 else position - 16;
         const two_fwd_pos = @as(u64, 1) << two_fwd_sq;
 
-        if (~occupied & two_fwd_pos != 0) {
+        if (board.unoccupied() & two_fwd_pos != 0) {
             moves |= two_fwd_pos;
         }
     }
@@ -855,13 +834,11 @@ pub fn getPawnMoves(position: Board.PositionIndex, board: *const Board) u64 {
     return moves;
 }
 
-pub fn getKnightMoves(position: Board.PositionIndex, board: *const Board) u64 {
+pub fn knightMovementMask(position: Board.PositionIndex, board: *const Board) u64 {
     const pos_bit: u64 = @as(u64, 1) << position;
     
-    const occupied = getOccupied(board);
-
     // Rather than return an error, let's just say this state is completely illegal and crash.
-    std.debug.assert((occupied & pos_bit) != 0);
+    std.debug.assert((board.occupied() & pos_bit) != 0);
 
     const color: PieceColor = if ((board.white & pos_bit) != 0)
         PieceColor.white
@@ -922,14 +899,13 @@ pub fn getKnightMoves(position: Board.PositionIndex, board: *const Board) u64 {
     return moves;
 }
 
-pub fn getBishopMoves(position: Board.PositionIndex, board: *const Board) u64 {
-    const occupied = getOccupied(board);
+pub fn bishopMovementMask(position: Board.PositionIndex, board: *const Board) u64 {
     const pos_bit: u64 = @as(u64, 1) << position;
 
     var moves: u64 = 0;
 
     // Rather than return an error, let's just say this state is completely illegal and crash.
-    std.debug.assert((occupied & pos_bit) != 0);
+    std.debug.assert((board.occupied() & pos_bit) != 0);
 
     const color: PieceColor = if ((board.white & pos_bit) != 0)
         PieceColor.white
@@ -949,14 +925,14 @@ pub fn getBishopMoves(position: Board.PositionIndex, board: *const Board) u64 {
             const current_bit = @as(u64, 1) << @intCast(current_pos);
 
             // Hit a friendly piece or a king
-            if (((friendly_pieces & current_bit) != 0) or (occupied & current_bit & board.kings) != 0) {
+            if (((friendly_pieces & current_bit) != 0) or (board.occupied() & current_bit & board.kings) != 0) {
                 break;
             }
             
             moves |= current_bit;
 
             // Hit an enemy piece
-            if ((occupied & current_bit) != 0) {
+            if ((board.occupied() & current_bit) != 0) {
                 break;
             }
 
@@ -975,13 +951,13 @@ pub fn getBishopMoves(position: Board.PositionIndex, board: *const Board) u64 {
             current_pos += 9;
             const current_bit = @as(u64, 1) << @intCast(current_pos);
             
-            if (((friendly_pieces & current_bit) != 0) or (occupied & current_bit & board.kings) != 0) {
+            if (((friendly_pieces & current_bit) != 0) or (board.occupied() & current_bit & board.kings) != 0) {
                 break;
             }
             
             moves |= current_bit;
             
-            if ((occupied & current_bit) != 0) {
+            if ((board.occupied() & current_bit) != 0) {
                 break;
             }
 
@@ -1000,13 +976,13 @@ pub fn getBishopMoves(position: Board.PositionIndex, board: *const Board) u64 {
             current_pos -= 7;
             const current_bit = @as(u64, 1) << @intCast(current_pos);
             
-            if (((friendly_pieces & current_bit) != 0) or (occupied & current_bit & board.kings) != 0) {
+            if (((friendly_pieces & current_bit) != 0) or (board.occupied() & current_bit & board.kings) != 0) {
                 break;
             }
             
             moves |= current_bit;
             
-            if ((occupied & current_bit) != 0) {
+            if ((board.occupied() & current_bit) != 0) {
                 break;
             }
 
@@ -1025,13 +1001,13 @@ pub fn getBishopMoves(position: Board.PositionIndex, board: *const Board) u64 {
             current_pos -= 9;
             const current_bit = @as(u64, 1) << @intCast(current_pos);
             
-            if (((friendly_pieces & current_bit) != 0) or (occupied & current_bit & board.kings) != 0) {
+            if (((friendly_pieces & current_bit) != 0) or (board.occupied() & current_bit & board.kings) != 0) {
                 break;
             }
             
             moves |= current_bit;
             
-            if ((occupied & current_bit) != 0) {
+            if ((board.occupied() & current_bit) != 0) {
                 break;
             }
 
@@ -1045,14 +1021,13 @@ pub fn getBishopMoves(position: Board.PositionIndex, board: *const Board) u64 {
     return moves;
 }
 
-pub fn getRookMoves(position: Board.PositionIndex, board: *const Board) u64 {
-    const occupied = getOccupied(board);
+pub fn rookMovementMask(position: Board.PositionIndex, board: *const Board) u64 {
     const pos_bit: u64 = @as(u64, 1) << position;
 
     var moves: u64 = 0;
 
     // Rather than return an error, let's just say this state is completely illegal and crash.
-    std.debug.assert((occupied & pos_bit) != 0);
+    std.debug.assert((board.occupied() & pos_bit) != 0);
 
     const color: PieceColor = if ((board.white & pos_bit) != 0)
         PieceColor.white
@@ -1071,14 +1046,14 @@ pub fn getRookMoves(position: Board.PositionIndex, board: *const Board) u64 {
         const current_bit = @as(u64, 1) << current_pos;
 
         // Hit a friendly piece or a king
-        if (((friendly_pieces & current_bit) != 0) or (occupied & current_bit & board.kings) != 0) {
+        if (((friendly_pieces & current_bit) != 0) or (board.occupied() & current_bit & board.kings) != 0) {
             break;
         }
         
         moves |= current_bit;
 
         // Hit an enemy piece
-        if ((occupied & current_bit) != 0) {
+        if ((board.occupied() & current_bit) != 0) {
             break;
         }
     }
@@ -1089,13 +1064,13 @@ pub fn getRookMoves(position: Board.PositionIndex, board: *const Board) u64 {
         current_pos -= 8;
         const current_bit = @as(u64, 1) << current_pos;
 
-        if (((friendly_pieces & current_bit) != 0) or (occupied & current_bit & board.kings) != 0) {
+        if (((friendly_pieces & current_bit) != 0) or (board.occupied() & current_bit & board.kings) != 0) {
             break;
         }
         
         moves |= current_bit;
         
-        if ((occupied & current_bit) != 0) {
+        if ((board.occupied() & current_bit) != 0) {
             break;
         }
     }
@@ -1106,13 +1081,13 @@ pub fn getRookMoves(position: Board.PositionIndex, board: *const Board) u64 {
         current_pos += 1;
         const current_bit = @as(u64, 1) << current_pos;
         
-        if (((friendly_pieces & current_bit) != 0) or (occupied & current_bit & board.kings) != 0) {
+        if (((friendly_pieces & current_bit) != 0) or (board.occupied() & current_bit & board.kings) != 0) {
             break;
         }
         
         moves |= current_bit;
         
-        if ((occupied & current_bit) != 0) {
+        if ((board.occupied() & current_bit) != 0) {
             break;
         }
     }
@@ -1123,13 +1098,13 @@ pub fn getRookMoves(position: Board.PositionIndex, board: *const Board) u64 {
         current_pos -= 1;
         const current_bit = @as(u64, 1) << current_pos;
         
-        if (((friendly_pieces & current_bit) != 0) or (occupied & current_bit & board.kings) != 0) {
+        if (((friendly_pieces & current_bit) != 0) or (board.occupied() & current_bit & board.kings) != 0) {
             break;
         }
         
         moves |= current_bit;
         
-        if ((occupied & current_bit) != 0) {
+        if ((board.occupied() & current_bit) != 0) {
             break;
         }
     }
@@ -1137,20 +1112,18 @@ pub fn getRookMoves(position: Board.PositionIndex, board: *const Board) u64 {
     return moves;
 }
 
-pub fn getQueenMoves(position: u6, board: *const Board) u64 {
-    const diagonals     = getBishopMoves(position, board);
-    const rank_and_file = getRookMoves(position, board);
+pub fn queenMovementMask(position: u6, board: *const Board) u64 {
+    const diagonals     = bishopMovementMask(position, board);
+    const rank_and_file = rookMovementMask(position, board);
 
     return diagonals | rank_and_file;
 }
 
-// TODO - Account for castling and check
-pub fn getKingMoves(position: u6, board: *const Board) u64 {
+pub fn kingMovementMask(position: u6, board: *const Board) u64 {
     const king_bitboard: u64 = @as(u64, 1) << position;
-    const occupied = getOccupied(board);
 
     // There better be a king here.
-    std.debug.assert(occupied & king_bitboard != 0);
+    std.debug.assert(board.occupied() & king_bitboard != 0);
 
     const is_white = (board.white & king_bitboard) != 0;
 
@@ -1196,20 +1169,20 @@ test "initializing an empty board results in all bits set to zero" {
     try std.testing.expectEqual(@as(u64, 0), b.kings);
 }
 
-test "`getOccupied` produces the union of bitboards `black` and `white`" {
+test "`occupied` produces the union of bitboards `black` and `white`" {
     var board: Board = Board.empty();
     board.white = 0x0F0F0F0F0F0F0F0F;
     board.black = 0xF0F0F0F0F0F0F0F0;
-    const actual = getOccupied(&board);
+    const actual = board.occupied();
 
     try std.testing.expectEqual(0xFFFFFFFFFFFFFFFF, actual);
 }
 
-test "`getUnoccupied` produces the negation of the union of bitboards `black` and `white`" {
+test "`unoccupied` produces the negation of the union of bitboards `black` and `white`" {
     var board: Board = Board.empty();
     board.white = 0x0F0F0F0F0F0F0F0F;
     board.black = 0xF0F0F0F0F0F0F0F0;
-    const actual = getUnoccupied(&board);
+    const actual = board.unoccupied();
 
     try std.testing.expectEqual(0x0000000000000000, actual);
 }
@@ -1224,13 +1197,13 @@ test "Pawns can move forward if they are on the board" {
     const black_pos: Board.PositionIndex = 61;
     board.black |= @as(u64, 1) << black_pos;
     board.pawns |= @as(u64, 1) << black_pos;
-    const black_moves = getPawnMoves(black_pos, &board);
+    const black_moves = pawnMovementMask(black_pos, &board);
     try std.testing.expectEqual(9007199254740992, black_moves);
 
     const white_pos: Board.PositionIndex = 7;
     board.white |= @as(u64, 1) << white_pos;
     board.pawns |= @as(u64, 1) << white_pos;
-    const white_moves: u64 = getPawnMoves(white_pos, &board);
+    const white_moves: u64 = pawnMovementMask(white_pos, &board);
     try std.testing.expectEqual(32768, white_moves);
 }
 
@@ -1245,13 +1218,13 @@ test "Pawns can move two spaces forward if they are in their starting rank" {
     const black_pos: Board.PositionIndex = 54;
     board.black |= @as(u64, 1) << black_pos;
     board.pawns |= @as(u64, 1) << black_pos;
-    const black_moves = getPawnMoves(black_pos, &board);
+    const black_moves = pawnMovementMask(black_pos, &board);
     try std.testing.expectEqual(70643622084608, black_moves);
 
     const white_pos: Board.PositionIndex = 11;
     board.white |= @as(u64, 1) << white_pos;
     board.pawns |= @as(u64, 1) << white_pos;
-    const white_moves: u64 = getPawnMoves(white_pos, &board);
+    const white_moves: u64 = pawnMovementMask(white_pos, &board);
     try std.testing.expectEqual(134742016, white_moves);
 }
 
@@ -1276,7 +1249,7 @@ test "Pawns can capture if enemy pieces occupy forward-diagonal spaces" {
     // - both diagonals (captures)
     // - advancing one rank
     // - advancing two ranks (because we're on our starting rank)
-    const black_moves = getPawnMoves(black_pos, &blk_board);
+    const black_moves = pawnMovementMask(black_pos, &blk_board);
     try std.testing.expectEqual(246565482528768, black_moves);
 }
 
@@ -1303,7 +1276,7 @@ test "Pawns cannot capture friendly pieces and cannot move into occupied squares
     board.black |= @as(u64, 1) << blk_r_pos;
     board.rooks |= @as(u64, 1) << blk_r_pos;
 
-    const moves = getPawnMoves(pawn_pos, &board);
+    const moves = pawnMovementMask(pawn_pos, &board);
     // No legal moves in this board state
     try std.testing.expectEqual(0, moves);
 }
@@ -1322,7 +1295,7 @@ test "Pawns cannot capture kings" {
     board.white |= @as(u64, 1) << white_k2_pos;
     board.kings |= @as(u64, 1) << white_k2_pos;
 
-    const moves = getPawnMoves(pawn_pos, &board);
+    const moves = pawnMovementMask(pawn_pos, &board);
 
     // We expect the pawn to only be able to move forward one space,
     // since the diagonals are occupied by kings which cannot be captured.
@@ -1335,13 +1308,13 @@ test "Pawns cannot move beyond the boundary of the board" {
     const white_pos: Board.PositionIndex = 62;
     board.pawns |= @as(u64, 1) << white_pos;
     board.white |= @as(u64, 1) << white_pos;
-    const white_moves = getPawnMoves(white_pos, &board);
+    const white_moves = pawnMovementMask(white_pos, &board);
     try std.testing.expectEqual(0, white_moves);
 
     const black_pos: Board.PositionIndex = 1;
     board.pawns |= @as(u64, 1) << black_pos;
     board.black |= @as(u64, 1) << black_pos;
-    const black_moves = getPawnMoves(black_pos, &board);
+    const black_moves = pawnMovementMask(black_pos, &board);
     try std.testing.expectEqual(0, black_moves);
 }
 
@@ -1372,7 +1345,7 @@ test "Knights can be moved in a 2 over 1 pattern of rank & file, over other piec
     board.white   |= @as(u64, 1) << 45;
     board.rooks   |= @as(u64, 1) << 45;
 
-    const moves = getKnightMoves(pos, &board);
+    const moves = knightMovementMask(pos, &board);
 
     try std.testing.expectEqual(11333767002587136, moves);
 }
@@ -1398,7 +1371,7 @@ test "Knights which have all destinations unreachable cannot move" {
     board.black  |= @as(u64, 1) << 22;
     board.queens |= @as(u64, 1) << 22;
 
-    const moves = getKnightMoves(pos, &board);
+    const moves = knightMovementMask(pos, &board);
 
     try std.testing.expectEqual(0, moves);
 }
@@ -1410,7 +1383,7 @@ test "Rooks can move across rank and file" {
     const pos: Board.PositionIndex = 36;
     board.rooks |= @as(u64, 1) << pos;
     board.white |= @as(u64, 1) << pos;
-    const moves = getRookMoves(pos, &board);
+    const moves = rookMovementMask(pos, &board);
 
     try std.testing.expectEqual(1157443723186933776, moves);
 }
@@ -1429,7 +1402,7 @@ test "Rooks which are boxed in have no valid moves" {
     board.kings |= @as(u64, 1) << 15;
     board.white |= @as(u64, 1) << 15;
 
-    const moves = getRookMoves(pos, &board);
+    const moves = rookMovementMask(pos, &board);
     try std.testing.expectEqual(0, moves);
 }
 
@@ -1440,7 +1413,7 @@ test "Bishops can move diagonally across the board" {
     board.bishops |= @as(u64, 1) << pos;
     board.black   |= @as(u64, 1) << pos;
 
-    const moves = getBishopMoves(pos, &board);
+    const moves = bishopMovementMask(pos, &board);
     try std.testing.expectEqual(550848566272, moves);
 }
 
@@ -1463,7 +1436,7 @@ test "Bishops with pieces at each corner can't move" {
     board.queens |= @as(u64, 1) << 11;
     board.white  |= @as(u64, 1) << 11;
 
-    const moves = getBishopMoves(pos, &board);
+    const moves = bishopMovementMask(pos, &board);
     try std.testing.expectEqual(0, moves);
 }
 
@@ -1486,7 +1459,7 @@ test "Bishops can move along their path until they encounter a capture" {
     board.queens |= @as(u64, 1) << 11;
     board.white  |= @as(u64, 1) << 11;
 
-    const moves = getBishopMoves(pos, &board);
+    const moves = bishopMovementMask(pos, &board);
     try std.testing.expectEqual(2216337342464, moves);
 }
 
@@ -1497,7 +1470,7 @@ test "Queen can move across rank and file as well as diagonally" {
     board.queens |= @as(u64, 1) << pos;
     board.black  |= @as(u64, 1) << pos;
 
-    const moves = getQueenMoves(pos, &board);
+    const moves = queenMovementMask(pos, &board);
     try std.testing.expectEqual(1266167048752878738, moves);
 }
 
@@ -1532,7 +1505,7 @@ test "Queen boxed in on all sides cannot move" {
     board.knights |= @as(u64, 1) << 21;
     board.black   |= @as(u64, 1) << 21;
 
-    const moves = getQueenMoves(pos, &board);
+    const moves = queenMovementMask(pos, &board);
     try std.testing.expectEqual(0, moves);
 }
 
@@ -1543,7 +1516,7 @@ test "Kings can move one space at a time on an empty board with no castling priv
     board.black |= @as(u64, 1) << pos;
     board.kings |= @as(u64, 1) << pos;
 
-    const moves = getKingMoves(pos, &board);
+    const moves = kingMovementMask(pos, &board);
     try std.testing.expectEqual(471079936, moves);
 }
 
@@ -1565,7 +1538,7 @@ test "Kings can which are boxed in by friendly pieces cannot move" {
     board.white |= @as(u64, 1) << 55;
     board.kings |= @as(u64, 1) << 55;
 
-    const moves = getKingMoves(pos, &board);
+    const moves = kingMovementMask(pos, &board);
     try std.testing.expectEqual(0, moves);
 }
 
@@ -1853,7 +1826,7 @@ test "Get attacked squares for entire team produces accurate bitboard" {
     {
         const board = Board.init();
 
-        const result = getAttacking(.white, &board);
+        const result = attackMask(.white, &board);
         const expected = Board.RANK_1 & ~(Board.FILE_A & Board.RANK_1)
                                      & ~(Board.FILE_H & Board.RANK_1)
                                      | Board.RANK_2
@@ -1893,7 +1866,7 @@ test "Get attacked squares for entire team produces accurate bitboard" {
         board.setPieceAt(.pawn,   .black, .G7);
         board.setPieceAt(.pawn,   .black, .H7);
 
-        const result = getAttacking(.white, &board);
+        const result = attackMask(.white, &board);
         
         // White's attacked squares in this position
         const expected = comptime Position.intoBitboard(&[_]Position{
