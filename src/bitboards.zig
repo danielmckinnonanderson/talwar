@@ -1756,5 +1756,64 @@ test "Get attacked squares for entire team produces accurate bitboard" {
 
         try std.testing.expectEqual(expected, result);
     }
+
+    {
+        var board = Board.empty();
+        // White pieces
+        try board.setPieceAt(.king,   .white, .E1);
+        try board.setPieceAt(.queen,  .white, .D4);
+        try board.setPieceAt(.rook,   .white, .A1);
+        try board.setPieceAt(.rook,   .white, .F1);
+        try board.setPieceAt(.bishop, .white, .C4);
+        try board.setPieceAt(.bishop, .white, .G2);
+        try board.setPieceAt(.knight, .white, .F3);
+        try board.setPieceAt(.pawn,   .white, .A2);
+        try board.setPieceAt(.pawn,   .white, .B2);
+        try board.setPieceAt(.pawn,   .white, .E4);
+        try board.setPieceAt(.pawn,   .white, .F2);
+        try board.setPieceAt(.pawn,   .white, .G3);
+        try board.setPieceAt(.pawn,   .white, .H2);
+        
+        // Black pieces for context
+        try board.setPieceAt(.king,   .black, .E8);
+        try board.setPieceAt(.queen,  .black, .D8);
+        try board.setPieceAt(.rook,   .black, .A8);
+        try board.setPieceAt(.rook,   .black, .F8);
+        try board.setPieceAt(.bishop, .black, .B7);
+        try board.setPieceAt(.pawn,   .black, .A7);
+        try board.setPieceAt(.knight, .black, .C6);
+        try board.setPieceAt(.pawn,   .black, .B6);
+        try board.setPieceAt(.pawn,   .black, .E5);
+        try board.setPieceAt(.pawn,   .black, .F7);
+        try board.setPieceAt(.pawn,   .black, .G7);
+        try board.setPieceAt(.pawn,   .black, .H7);
+
+        const result = getAttacking(.white, &board);
+        
+        // White's attacked squares in this position
+        const expected = comptime Position.intoBitboard(&[_]Position{
+            // King attacks
+            .D1, .D2, .E2, .F2, .F1,
+            // Queen attacks (diagonal and straight lines from D4)
+            .D1, .D2, .D3, .D5, .D6, .D7, .D8,
+            .C4, .E4,
+            .A1, .B2, .C3, .E5,
+            .F2, .E3, .C5, .B6,
+            // Rook attacks
+            .A2, .F2,
+            .B1, .C1, .D1, .E1, .G1, .H1,
+            // Bishop attacks
+            .A2, .B3, .D5, .E6, .F7,
+            .B5, .A6,
+            .D3, .E2, .F1,
+            .F7, .E4, .D5,
+            // Knight attacks
+            .D2, .D4, .E1, .E5, .G1, .G5, .H2, .H4,
+            // Pawn attacks
+            .A3, .B3, .C3, .D5, .F5, .E3, .G3, .F4, .H4,
+        });
+        
+        try std.testing.expectEqual(expected, result);
+    }
 }
 
