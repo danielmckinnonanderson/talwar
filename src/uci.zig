@@ -5,7 +5,9 @@ const mem = std.mem;
 // This section is based on the specification of the UCI protocol
 // described at https://gist.github.com/DOBRO/2592c6dad754ba67e6dcaec8c90165bf
 
+
 pub const Uci = enum {
+    /// Command from the GUI to the engine
     pub const EngineCommand = union(enum) {
         uci,
         debug: bool, // allowed tokens "on" and "off"
@@ -391,6 +393,7 @@ pub const Uci = enum {
         }
     };
 
+    /// Command from the engine to the GUI
     pub const GuiCommand = union(enum) {
         id: union(enum) {
             name: []const u8,
@@ -536,8 +539,6 @@ pub fn Interface(comptime ReaderType: type, comptime WriterType: type) type {
         /// Send the given command to the output stream.
         /// Return an error if the output could not be sent.
         pub fn send(self: *@This(), command: Uci.GuiCommand) !void {
-            std.debug.print("Sending something!\n", .{});
-
             var bw = std.io.bufferedWriter(self.output_stream);
             const output = bw.writer();
 
@@ -546,13 +547,11 @@ pub fn Interface(comptime ReaderType: type, comptime WriterType: type) type {
             switch (command) {
                 .id => |subcommand| {
                     switch (subcommand) {
-                        .author => {
-                            // TODO - Externalize variable
-                            try output.print("id author Daniel\n", .{});
+                        .author => |author| {
+                            try output.print("id author {s}\n", .{ author });
                         },
-                        .name => {
-                            // TODO - Externalize variable
-                            try output.print("id name Talwar [development]\n", .{});
+                        .name => |name| {
+                            try output.print("id name {s}\n", .{ name });
                         },
                     }
                 },
@@ -655,21 +654,7 @@ pub fn Interface(comptime ReaderType: type, comptime WriterType: type) type {
                 .option => |option| {
                     // TODO
                     _ = option;
-                    unreachable;
                 },
-            }
-        }
-
-        pub fn onInputCommand(self: *@This(), input: Uci.EngineCommand) !void {
-            switch (input) {
-                .uci => {
-                    try self.send(.{ .id = .{ .name = "Name" }});
-                    try self.send(.{ .id = .{ .author = "Author" }});
-                    try self.send(.uciok);
-                },
-                else => {
-                    unreachable;
-                }
             }
         }
     };

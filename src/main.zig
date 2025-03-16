@@ -2,17 +2,13 @@ const std       = @import("std");
 const bitboards = @import("bitboards.zig");
 const logging   = @import("logging.zig");
 const uci       = @import("uci.zig");
+const Engine    = @import("engine.zig").Engine;
 
 pub fn main() !void {
     var logger = try logging.Logger.init("talwar.log", .debug);
     errdefer logger.deinit();
 
-    const actual = 567348067172352;
-    const dest = 4294967296;
-
-    bitboards.Board.printBitboard(actual);
-    bitboards.Board.printBitboard(dest);
-
+    var engine = Engine.init();
 
     const stdin  = std.io.getStdIn().reader();
     const stdout = std.io.getStdOut().writer();
@@ -24,13 +20,19 @@ pub fn main() !void {
     // TODO - Poll on new input to stdin (wait for some amount of time between polls)
     //        On new input, parse it into command and respond accordingly
     while (true) {
-        const cmd: ?uci.Uci.EngineCommand = try interface.poll();
+        const cmd: ?uci.Uci.EngineCommand = interface.poll() catch {
+            try logger.printerr("Error while reading command from input");
+            continue;
+        };
 
         if (cmd == null) {
             continue;
         }
 
-        try interface.onInputCommand(cmd.?);
+        // TODO - Fix logging so this is actually useful...
+        try logger.info("Received command...");
+
+        try engine.handleCommand(&interface, cmd.?);
     }
 }
 
