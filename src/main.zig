@@ -7,6 +7,13 @@ pub fn main() !void {
     var logger = try logging.Logger.init("talwar.log", .debug);
     errdefer logger.deinit();
 
+    const actual = 567348067172352;
+    const dest = 4294967296;
+
+    bitboards.Board.printBitboard(actual);
+    bitboards.Board.printBitboard(dest);
+
+
     const stdin  = std.io.getStdIn().reader();
     const stdout = std.io.getStdOut().writer();
     const Interface = uci.Interface(@TypeOf(stdin), @TypeOf(stdout));

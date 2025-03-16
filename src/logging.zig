@@ -47,7 +47,7 @@ pub const Logger = struct {
 
     inline fn logMessage(self: *Self, log_level: []const u8, comptime message: []const u8) !void {
         const timestamp = std.time.timestamp();
-        try self.writer.print("{d} [{s}]: \"{s}\"", .{timestamp, log_level, message});
+        try self.writer.print("{d} [{s}]: \"{s}\"\n", .{timestamp, log_level, message});
     }
 };
 

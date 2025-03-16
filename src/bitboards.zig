@@ -37,12 +37,17 @@ pub const Position = enum {
     pub fn intoBitboard(positions: []const Position) u64 {
         var bitboard: u64 = 0;
         
-        inline for (positions) |position| {
+        for (positions) |position| {
             bitboard |= @as(u64, 1) << Position.intoIndex(position);
         }
 
         return bitboard;
     }
+};
+
+pub const PieceInfo = struct {
+    color: PieceColor,
+    piece: Piece,
 };
 
 pub const Board = struct {
@@ -127,26 +132,46 @@ pub const Board = struct {
         return board;
     }
 
-    /// Place a piece at an empty space.
-    /// If the space is occupied, raises `PlacementError.PositionOccupied`.
+    pub const GetPieceError = error { PositionUnoccupied };
+
+    pub fn getPieceAt(self: *const Board, position: Position) GetPieceError!PieceInfo {
+        const pos_bits = @as(u64, 1) << Position.intoIndex(position);
+        
+        const color = if (self.white & pos_bits != 0)
+            PieceColor.white
+        else if (self.black & pos_bits != 0)
+            PieceColor.black
+        else
+            return GetPieceError.PositionUnoccupied;
+        
+        const piece = if (self.pawns & pos_bits != 0)
+            Piece.pawn
+        else if (self.knights & pos_bits != 0)
+            Piece.knight
+        else if (self.bishops & pos_bits != 0)
+            Piece.bishop
+        else if (self.rooks & pos_bits != 0)
+            Piece.rook
+        else if (self.queens & pos_bits != 0)
+            Piece.queen
+        else if (self.kings & pos_bits != 0)
+            Piece.king
+        else {
+            std.debug.assert(false and "Occupied square had no piece type present. This is quite bad.");
+            unreachable;
+        };
+
+        
+        return .{ .piece = piece, .color = color };
+    }
+
     pub fn setPieceAt(
         self: *Board,
         piece: Piece,
         color: PieceColor,
         position: Position,
-    ) PlacementError!void {
+    ) void {
         const pos_bit = @as(u64, 1) << Position.intoIndex(position);
-        const occupied = getOccupied(self);
-
-        if ((occupied & pos_bit) != 0) {
-            return PlacementError.PositionOccupied;
-        }
-
-        if (color == .black) {
-            self.black |= pos_bit;
-        } else {
-            self.white |= pos_bit;
-        }
 
         switch (piece) {
             .pawn   => self.pawns   |= pos_bit,
@@ -156,8 +181,106 @@ pub const Board = struct {
             .queen  => self.queens  |= pos_bit,
             .king   => self.kings   |= pos_bit,
         }
+
+
+        if (color == .black) {
+            self.black |= pos_bit;
+            self.attacked_by_black = getAttacking(.black, self);
+        } else {
+            self.white |= pos_bit;
+            self.attacked_by_white = getAttacking(.white, self);
+        }
     }
 
+    const RemovePieceError = error { PositionUnoccupied };
+
+    pub fn removePieceAt(self: *Board, position: Position) !void {
+        const present = self.getPieceAt(position) catch {
+            return RemovePieceError.PositionUnoccupied;
+        };
+
+        const pos_bits = @as(u64, 1) << Position.intoIndex(position);
+
+        if (present.color == .white) {
+            self.white &= ~pos_bits;
+        } else {
+            self.black &= ~pos_bits;
+        }
+
+        switch (present.piece) {
+            .pawn   => self.pawns   &= ~pos_bits,
+            .knight => self.knights &= ~pos_bits,
+            .bishop => self.bishops &= ~pos_bits,
+            .rook   => self.rooks   &= ~pos_bits,
+            .queen  => self.queens  &= ~pos_bits,
+            .king   => self.kings   &= ~pos_bits,
+        }
+
+        self.attacked_by_white = getAttacking(.white, self);
+        self.attacked_by_black = getAttacking(.black, self);
+    }
+
+    pub const ApplyMoveError = error {
+        OriginUnoccupied,
+        IllegalMove,
+        MoveIntoCheck
+    };
+
+    pub fn applyMove(self: *Board, from: Position, to: Position) ApplyMoveError!void {
+        const piece_info: PieceInfo = self.getPieceAt(from) catch {
+            return ApplyMoveError.OriginUnoccupied;
+        };
+
+        const origin_idx = Position.intoIndex(from);
+        const dest_bits = Position.intoBitboard(&[1]Position{ to });
+
+        const moves = switch (piece_info.piece) {
+            .pawn   => getPawnMoves(origin_idx, self),
+            .knight => getKnightMoves(origin_idx, self),
+            .bishop => getBishopMoves(origin_idx, self),
+            .rook   => getRookMoves(origin_idx, self),
+            .queen  => getQueenMoves(origin_idx, self),
+            .king   => getKingMoves(origin_idx, self),
+        };
+
+        // If we have nowhere to move to before we even begin filtering,
+        // or if the desired destination is not a legal move,
+        // then the provided destination is illegal no matter what.
+        if (moves == 0 or (moves & dest_bits) == 0) {
+            return ApplyMoveError.IllegalMove;
+        }
+
+        if ((moves & dest_bits) == 0) {
+            return ApplyMoveError.IllegalMove;
+        }
+
+        // Copy the board and speculatively apply the move to it
+        var speculative: Board = self.*;
+
+        // Remove the piece at `from` and place it at `to`.
+        // We also expect `setPieceAt` to recalculate the `attack_by` mask.
+        speculative.removePieceAt(from) catch unreachable;
+
+        // If there is a piece present it will be removed, and if there
+        // isn't a piece present we don't care (thus we discard the error)
+        speculative.removePieceAt(to) catch {};
+
+        speculative.setPieceAt(piece_info.piece, piece_info.color, to);
+
+        // Finally, check if our own king is in check
+        const op_attacks = if (piece_info.color == .white) speculative.attacked_by_black
+            else speculative.attacked_by_white;
+
+        const allies = if (piece_info.color == .white) speculative.white else speculative.black;
+
+        if ((allies & speculative.kings) & op_attacks != 0) {
+            return ApplyMoveError.MoveIntoCheck;
+        }
+
+        // Otherwise, this is a legal move that does not put us into check.
+        // Persist the move by ending speculation.
+        self.* = speculative;
+    }
 
     /// Implements the format interface for the board as whole, writing the
     /// pieces / colors to a visual representation
@@ -1446,24 +1569,6 @@ test "Kings can which are boxed in by friendly pieces cannot move" {
     try std.testing.expectEqual(0, moves);
 }
 
-test "Setting piece on an occupied space raises an error" {
-    var board = Board.empty();
-    const pos = .C6;
-
-    // Make the position occupied
-    board.black |= (@as(u64, 1) << comptime Position.intoIndex(pos));
-    board.kings |= (@as(u64, 1) << comptime Position.intoIndex(pos));
-
-    // This should now raise an error because the pos is occupied
-    try std.testing.expectError(
-        PlacementError.PositionOccupied,
-        board.setPieceAt(Piece.pawn, PieceColor.white, pos));
-
-    // White & pawns should both still be empty since we bailed
-    try std.testing.expectEqual(0, board.pawns);
-    try std.testing.expectEqual(0, board.white);
-}
-
 test "Placing piece on an empty space updates the bit-board representations" {
     var board = Board.empty();
     const pos = .C6;
@@ -1471,7 +1576,7 @@ test "Placing piece on an empty space updates the bit-board representations" {
     try std.testing.expectEqual(0, board.black);
     try std.testing.expectEqual(0, board.queens);
 
-    try board.setPieceAt(Piece.queen, PieceColor.black, pos);
+    board.setPieceAt(Piece.queen, PieceColor.black, pos);
 
     try std.testing.expectEqual(4398046511104, board.black);
     try std.testing.expectEqual(4398046511104, board.queens);
@@ -1756,5 +1861,167 @@ test "Get attacked squares for entire team produces accurate bitboard" {
 
         try std.testing.expectEqual(expected, result);
     }
+
+    {
+        var board = Board.empty();
+        // White pieces
+        board.setPieceAt(.king,   .white, .E1);
+        board.setPieceAt(.queen,  .white, .D4);
+        board.setPieceAt(.rook,   .white, .A1);
+        board.setPieceAt(.rook,   .white, .F1);
+        board.setPieceAt(.bishop, .white, .C4);
+        board.setPieceAt(.bishop, .white, .G2);
+        board.setPieceAt(.knight, .white, .F3);
+        board.setPieceAt(.pawn,   .white, .A2);
+        board.setPieceAt(.pawn,   .white, .B2);
+        board.setPieceAt(.pawn,   .white, .E4);
+        board.setPieceAt(.pawn,   .white, .F2);
+        board.setPieceAt(.pawn,   .white, .G3);
+        board.setPieceAt(.pawn,   .white, .H2);
+        
+        // Black pieces for context
+        board.setPieceAt(.king,   .black, .E8);
+        board.setPieceAt(.queen,  .black, .D8);
+        board.setPieceAt(.rook,   .black, .A8);
+        board.setPieceAt(.rook,   .black, .F8);
+        board.setPieceAt(.bishop, .black, .B7);
+        board.setPieceAt(.pawn,   .black, .A7);
+        board.setPieceAt(.knight, .black, .C6);
+        board.setPieceAt(.pawn,   .black, .B6);
+        board.setPieceAt(.pawn,   .black, .E5);
+        board.setPieceAt(.pawn,   .black, .F7);
+        board.setPieceAt(.pawn,   .black, .G7);
+        board.setPieceAt(.pawn,   .black, .H7);
+
+        const result = getAttacking(.white, &board);
+        
+        // White's attacked squares in this position
+        const expected = comptime Position.intoBitboard(&[_]Position{
+            // King attacks
+            .D1, .D2, .E2, .F2, .F1,
+            // Queen attacks (diagonal and straight lines from D4)
+            .D1, .D2, .D3, .D5, .D6, .D7, .D8,
+            .C4, .E4,
+            .B2, .C3, .E5,
+            .F2, .E3, .C5, .B6,
+            // Rook attacks
+            .A2, .F2,
+            .B1, .C1, .D1, .E1, .G1, .H1,
+            // Bishop attacks
+            .A2, .B3, .D5, .E6, .F7,
+            .B5, .A6,
+            .D3, .E2, .F1,
+            .F7, .E4, .D5,
+            .F3, .H3, .H1,
+            // Knight attacks
+            .D2, .D4, .E1, .E5, .G1, .G5, .H2, .H4,
+            // Pawn attacks
+            .A3, .B3, .C3, .D5, .F5, .E3, .G3, .F4, .H4,
+        });
+        
+        try std.testing.expectEqual(expected, result);
+    }
+}
+
+test "Board can retrieve pieces by position" {
+    const board = Board.init();
+
+    {
+        const result = board.getPieceAt(.A4);
+        const expected = Board.GetPieceError.PositionUnoccupied;
+
+        try std.testing.expectEqual(expected, result);
+    }
+
+    {
+        const result = board.getPieceAt(.D1);
+        const expected = PieceInfo{ .piece = .queen, .color = .white };
+
+        try std.testing.expectEqual(expected, result);
+    }
+
+    {
+        const result = board.getPieceAt(.G7);
+        const expected = PieceInfo{ .piece = .pawn, .color = .black };
+
+        try std.testing.expectEqual(expected, result);
+    }
+}
+
+test "Removing piece at unoccupied square returns an error" {
+    var board = Board.init();
+
+    const result = board.removePieceAt(.A4);
+    try std.testing.expectEqual(Board.RemovePieceError.PositionUnoccupied, result);
+}
+
+test "Removing piece produces updated bitboards" {
+    var board = Board.init();
+
+    try board.removePieceAt(.D7);
+    try std.testing.expectEqual(
+        board.pawns & board.black,
+        comptime Position.intoBitboard(&[_]Position{ .A7, .B7, .C7, .E7, .F7, .G7, .H7 }));
+
+    try std.testing.expectEqual(
+        comptime Position.intoBitboard(
+            &[_]Position{ .B8, .C8, .D8, .E8, .F8, .G8, // back row (except rooks) still all attacked
+                          .A7, .B7, .C7, .D7, .E7, .F7, .G7, .H7, // pawn row is still all attacked
+                          .A6, .B6, .C6, .D6, .E6, .F6, .G6, .H6, // remaining pawns attacked sq's
+                          .D7, .D6, .D5, .D4, .D3, .D2, // uncovered queen's attacked sq's
+                          .D7, .E6, .F5, .G4, .H3, // uncovered bishop's attacked sq's
+            }),
+        board.attacked_by_black);
+}
+
+test "Applying movement from an unoccupied square returns an error" {
+    var board = Board.init();
+
+    // Nobody is on A5
+    const result = board.applyMove(.A5, .A6);
+    try std.testing.expectEqual(Board.ApplyMoveError.OriginUnoccupied, result);
+}
+
+test "Applying illegal movement returns an error" {
+    var board = Board.init();
+
+    const result = board.applyMove(.H1, .H5);
+    try std.testing.expectEqual(Board.ApplyMoveError.IllegalMove, result);
+}
+
+test "Applying legal move which moves into check produces an error" {
+    var board = Board.empty();
+
+    // The white knight is blocking the rook's attack, which would put the king in check
+    board.setPieceAt(.king, .white, .A4);
+    board.setPieceAt(.knight, .white, .A5);
+    board.setPieceAt(.rook, .black, .A8);
+
+    // Try to move the knight out of the rook's path, producing check
+    const result = board.applyMove(.A5, .B7);
+
+    try std.testing.expectEqual(Board.ApplyMoveError.MoveIntoCheck, result);
+}
+
+test "Applying legal move updates the board" {
+    var board = Board.empty();
+
+    board.setPieceAt(.knight, .black, .C6);
+    board.setPieceAt(.rook, .white, .B4);
+    board.setPieceAt(.bishop, .white, .D1);
+
+    try board.applyMove(.C6, .B4);
+
+    const expected_bishops = Position.intoBitboard(&[_]Position{ .D1 });
+    const expected_rooks   = 0;
+    const expected_knights = Position.intoBitboard(&[_]Position{ .B4 });
+    const expected_w_atk   = Position.intoBitboard(&[_]Position{ .C2, .B3, .A4, .E2, .F3, .G4, .H5 });
+    const expected_b_atk   = Position.intoBitboard(&[_]Position{ .A2, .A6, .C2, .C6, .D3, .D5  });
+
+    try std.testing.expectEqual(expected_bishops, board.bishops);
+    try std.testing.expectEqual(expected_rooks,   board.rooks);
+    try std.testing.expectEqual(expected_knights, board.knights);
+    try std.testing.expectEqual(expected_w_atk,   board.attacked_by_white);
+    try std.testing.expectEqual(expected_b_atk,   board.attacked_by_black);
 }
 
