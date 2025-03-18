@@ -16,9 +16,8 @@ zig build test --summary all
 
 ## Todo's
 ### Bitboard representation
-- Bitboard can determine if king is in check
-- Bitboard prevents moving into check (pinning), restricts moves in check to moving
-  out of check only
+- En passant
+- Castling
 
 ### UCI protocol
 - Implement protocol to connect to GUI
