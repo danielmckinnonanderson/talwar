@@ -3,37 +3,44 @@ const bitboards = @import("bitboards.zig");
 const uci       = @import("uci.zig");
 const Board     = bitboards.Board;
 
-pub const Engine = struct {
+pub const EngineConfig = struct {
     debug: bool,
 
-    pub fn init() Engine {
-        return Engine {
+    pub fn init() EngineConfig {
+        return EngineConfig {
             .debug = false,
         };
     }
+};
 
-    pub const CommandHandlerError = error {};
+pub const HandlerError = error { Unimplemented };
 
-    pub fn handleCommand(
-        self: *Engine,
-        interface: anytype,
-        cmd: uci.Uci.EngineCommand,
-    ) !void {
-        _ = self;
+pub fn handleCommand(
+    cfg: *EngineConfig,
+    cmd: uci.Uci.EngineCommand,
+    output_writer: anytype,
+) !void {
+    const GuiCommand = uci.Uci.GuiCommand;
 
-        switch (cmd) {
-            .uci => {
-                try interface.send(uci.Uci.GuiCommand{ .id = .{ .author = "Daniel" }});
-                try interface.send(uci.Uci.GuiCommand{ .id = .{ .name = "talwar [development]" }});
+    switch (cmd) {
+        .uci => {
+            try uci.send(
+                output_writer,
+                GuiCommand{ .id = .{ .author = "Daniel" }});
+            try uci.send(
+                output_writer,
+                GuiCommand{ .id = .{ .name = "talwar [development]" }});
 
-                // TODO - Send `option` command here for all parameters that can be changed in engine
+            // TODO - Send `option` command here for all parameters that can be changed in engine
 
-                try interface.send(.uciok);
-            },
-            else => {
-                unreachable;
-            }
+            try uci.send(output_writer, .uciok);
+        },
+        .debug => |is_enabled| {
+            cfg.debug = is_enabled;
+        },
+        else => {
+            return HandlerError.Unimplemented;
         }
     }
-};
+}
 

@@ -502,162 +502,151 @@ pub const Uci = enum {
     };
 };
 
-// Used to communicate with the engine, and for the engine to communicate
-// with the UI
-pub fn Interface(comptime ReaderType: type, comptime WriterType: type) type {
-    return struct {
-        input_stream: ReaderType,
-        output_stream: WriterType,
+const CommandPollError = error { ReadFailed, UnparseableInput };
 
-        pub fn init(input_stream: anytype, output_stream: anytype) @This() {
-            return .{
-                .input_stream  = input_stream,
-                .output_stream = output_stream,
-            };
-        }
-
-        /// Check the input stream for new commands.
-        /// If no input is present, return `null`.
-        /// If an input is present, attempt to parse it and returned the parsed command, or an error.
-        pub fn poll(self: *@This()) !?Uci.EngineCommand {
-            var buf: [128]u8 = undefined;
-            const input = try self.input_stream.readUntilDelimiterOrEof(&buf, '\n');
-
-            if (input == null) {
-                return null;
-            }
-
-            const command = Uci.EngineCommand.fromString(&input.?) catch |err| {
-                std.debug.print("Could not parse command: {}\n", .{err});
-                return null;
-            };
-
-            return command;
-        }
-
-        const CommandSendError = error{ };
-        /// Send the given command to the output stream.
-        /// Return an error if the output could not be sent.
-        pub fn send(self: *@This(), command: Uci.GuiCommand) !void {
-            var bw = std.io.bufferedWriter(self.output_stream);
-            const output = bw.writer();
-
-            defer bw.flush() catch unreachable;
-
-            switch (command) {
-                .id => |subcommand| {
-                    switch (subcommand) {
-                        .author => |author| {
-                            try output.print("id author {s}\n", .{ author });
-                        },
-                        .name => |name| {
-                            try output.print("id name {s}\n", .{ name });
-                        },
-                    }
-                },
-                .uciok => {
-                    try output.print("uciok\n", .{});
-                },
-                .readyok => {
-                    try output.print("readyok\n", .{});
-                },
-                .bestmove => |moves| {
-                    if (moves.move2 != null) {
-                        try output.print("bestmove {s} ponder {s}\n", .{ moves.move1, moves.move2.? });
-                    } else {
-                        try output.print("bestmove {s}\n", .{ moves.move1 });
-                    }
-                },
-                .copyprotection => {
-                    // FIXME
-                    unreachable;
-                },
-                .registration => {
-                    // FIXME
-                    unreachable;
-                },
-                .info => |info| {
-                    switch (info) {
-                        .depth => |plies| {
-                            _ = plies;
-                        },
-                        .seldepth => |plies| {
-                            _ = plies;
-                        },
-                        .time => |millis| {
-                            _ = millis;
-                        },
-                        .nodes => |number| {
-                            _ = number;
-                        },
-                        .pv => |line| {
-                            _ = line;
-                        },
-                        .multipv => |number| {
-                            _ = number;
-                        },
-                        .score => |score| {
-                            switch (score) {
-                                .cp => |centipawns| {
-                                    _ = centipawns;
-                                },
-                                .mate => |number| {
-                                    _ = number;
-                                },
-                                .lowerbound => |number| {
-                                    _ = number;
-                                },
-                                .upperbound => |number| {
-                                    _ = number;
-                                }
-                            }
-                        },
-                        .currmove => |move| {
-                            _ = move;
-
-                        },
-                        .currmovenumber => |number| {
-                            _ = number;
-
-                        },
-                        .hashfull => |permill| {
-                            _ = permill;
-
-                        },
-                        .nps => |nodes_per_sec| {
-                            _ = nodes_per_sec;
-                        },
-                        .tbhits => |number| {
-                            _ = number;
-                        },
-                        .sbhits => |number| {
-                            _ = number;
-
-                        },
-                        .cpuload => |permill| {
-                            _ = permill;
-
-                        },
-                        .string => |str| {
-                            _ = str;
-
-                        },
-                        .refutation => |moves| {
-                            _ = moves;
-
-                        },
-                        .currline => |payload| {
-                            _ = payload;
-                        },
-                    }
-                },
-                .option => |option| {
-                    // TODO
-                    _ = option;
-                },
-            }
-        }
+/// Check the input stream for new commands.
+/// If no input is present, return `null`.
+/// If an input is present, attempt to parse it and returned the parsed command, or an error.
+pub fn poll(input_reader: anytype) CommandPollError!?Uci.EngineCommand {
+    var buf: [128]u8 = undefined;
+    const input = input_reader.readUntilDelimiterOrEof(&buf, '\n') catch {
+        return CommandPollError.ReadFailed;
     };
+
+    if (input == null) {
+        return null;
+    }
+
+    const command = Uci.EngineCommand.fromString(&input.?) catch {
+        return CommandPollError.UnparseableInput;
+    };
+
+    return command;
+}
+
+/// Send the given command to the output stream.
+/// Return an error if the output could not be sent.
+pub fn send(
+    output_writer: anytype,
+    command: Uci.GuiCommand,
+) !void {
+    var bw = std.io.bufferedWriter(output_writer);
+    const output = bw.writer();
+
+    defer bw.flush() catch unreachable;
+
+    switch (command) {
+        .id => |subcommand| {
+            switch (subcommand) {
+                .author => |author| {
+                    try output.print("id author {s}\n", .{ author });
+                },
+                .name => |name| {
+                    try output.print("id name {s}\n", .{ name });
+                },
+            }
+        },
+        .uciok => {
+            try output.print("uciok\n", .{});
+        },
+        .readyok => {
+            try output.print("readyok\n", .{});
+        },
+        .bestmove => |moves| {
+            if (moves.move2 != null) {
+                try output.print("bestmove {s} ponder {s}\n", .{ moves.move1, moves.move2.? });
+            } else {
+                try output.print("bestmove {s}\n", .{ moves.move1 });
+            }
+        },
+        .copyprotection => {
+            // FIXME
+            unreachable;
+        },
+        .registration => {
+            // FIXME
+            unreachable;
+        },
+        .info => |info| {
+            switch (info) {
+                .depth => |plies| {
+                    _ = plies;
+                },
+                .seldepth => |plies| {
+                    _ = plies;
+                },
+                .time => |millis| {
+                    _ = millis;
+                },
+                .nodes => |number| {
+                    _ = number;
+                },
+                .pv => |line| {
+                    _ = line;
+                },
+                .multipv => |number| {
+                    _ = number;
+                },
+                .score => |score| {
+                    switch (score) {
+                        .cp => |centipawns| {
+                            _ = centipawns;
+                        },
+                        .mate => |number| {
+                            _ = number;
+                        },
+                        .lowerbound => |number| {
+                            _ = number;
+                        },
+                        .upperbound => |number| {
+                            _ = number;
+                        }
+                    }
+                },
+                .currmove => |move| {
+                    _ = move;
+
+                },
+                .currmovenumber => |number| {
+                    _ = number;
+
+                },
+                .hashfull => |permill| {
+                    _ = permill;
+
+                },
+                .nps => |nodes_per_sec| {
+                    _ = nodes_per_sec;
+                },
+                .tbhits => |number| {
+                    _ = number;
+                },
+                .sbhits => |number| {
+                    _ = number;
+
+                },
+                .cpuload => |permill| {
+                    _ = permill;
+
+                },
+                .string => |str| {
+                    _ = str;
+
+                },
+                .refutation => |moves| {
+                    _ = moves;
+
+                },
+                .currline => |payload| {
+                    _ = payload;
+                },
+            }
+        },
+        .option => |option| {
+            // TODO
+            _ = option;
+        },
+    }
 }
 
 test "Parses string 'uci' into command" {
