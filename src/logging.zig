@@ -23,31 +23,32 @@ pub const Logger = struct {
         self.file.close();
     }
     
-    pub fn printerr(self: *Self, comptime message: []const u8) !void {
-        try self.logMessage("ERROR", message);
+    pub fn printerr(self: *Self, comptime fmt: []const u8, arg: anytype) !void {
+        try self.logMessage("ERROR", fmt, arg);
     }
     
-    pub fn warn(self: *Self, comptime message: []const u8) !void {
+    pub fn warn(self: *Self, comptime fmt: []const u8, arg: anytype) !void {
         if (@intFromEnum(self.level) >= @intFromEnum(LogLevel.warn)) {
-            try self.logMessage("WARN", message);
+            try self.logMessage("WARN", fmt, arg);
         }
     }
     
-    pub fn info(self: *Self, comptime message: []const u8) !void {
+    pub fn info(self: *Self, comptime fmt: []const u8, arg: anytype) !void {
         if (@intFromEnum(self.level) >= @intFromEnum(LogLevel.info)) {
-            try self.logMessage("INFO", message);
+            try self.logMessage("INFO", fmt, arg);
         }
     }
     
-    pub fn debug(self: *Self, comptime message: []const u8) !void {
+    pub fn debug(self: *Self, comptime fmt: []const u8, arg: anytype) !void {
         if (@intFromEnum(self.level) >= @intFromEnum(LogLevel.debug)) {
-            try self.logMessage("DEBUG", message);
+            try self.logMessage("DEBUG", fmt, arg);
         }
     }
 
-    inline fn logMessage(self: *Self, log_level: []const u8, comptime message: []const u8) !void {
-        const timestamp = std.time.timestamp();
-        try self.writer.print("{d} [{s}]: \"{s}\"\n", .{timestamp, log_level, message});
+    inline fn logMessage(self: *Self, log_level: []const u8, comptime fmt: []const u8, arg: anytype) !void {
+        try self.writer.print("{s}: \"", .{log_level});
+        try self.writer.print(fmt, arg);
+        try self.writer.print("\"\n", .{});
     }
 };
 

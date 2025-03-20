@@ -12,7 +12,7 @@ pub fn main() !void {
     const stdin  = std.io.getStdIn().reader();
     const stdout = std.io.getStdOut().writer();
 
-    try logger.debug("Talwar started up");
+    try logger.debug("Talwar started up", .{});
 
     // NOTE - Protocol seems to stipulate that this should only
     //        happen when the UI tells us to initialize.
@@ -23,7 +23,7 @@ pub fn main() !void {
     //        On new input, parse it into command and respond accordingly
     while (true) {
         const cmd = uci.poll(stdin) catch {
-            try logger.printerr("Error while trying to read command from input");
+            try logger.printerr("Error while trying to read command from input", .{});
             continue;
         };
 
@@ -31,9 +31,7 @@ pub fn main() !void {
             continue;
         }
 
-        // TODO - Fix logging so this is actually useful...
-        try logger.info("Received command...");
-
+        try logger.debug("Received command `{any}`", .{cmd.?});
         try engine.handleCommand(&cfg, cmd.?, stdout);
     }
 }
