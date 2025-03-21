@@ -78,12 +78,12 @@ pub const Board = struct {
     attacked_by_white: u64,
     attacked_by_black: u64,
 
-    pawns: u64,
-    knights: u64,
-    bishops: u64,
-    rooks: u64,
-    queens: u64,
-    kings: u64,
+    pawns:   u64 = 0,
+    knights: u64 = 0,
+    bishops: u64 = 0,
+    rooks:   u64 = 0,
+    queens:  u64 = 0,
+    kings:   u64 = 0,
 
     pub fn empty() Board {
         return Board {
@@ -178,7 +178,7 @@ pub const Board = struct {
         piece: Piece,
         color: PieceColor,
         position: Position,
-    ) void {
+    ) !void {
         const pos_bit = @as(u64, 1) << Position.intoIndex(position);
 
         switch (piece) {
@@ -202,7 +202,7 @@ pub const Board = struct {
 
     const RemovePieceError = error { PositionUnoccupied };
 
-    pub fn removePieceAt(self: *Board, position: Position) !void {
+    pub fn removePieceAt(self: *Board, position: Position) RemovePieceError!void {
         const present = self.getPieceAt(position) catch {
             return RemovePieceError.PositionUnoccupied;
         };
@@ -250,6 +250,10 @@ pub const Board = struct {
             .rook   => rookMovementMask(origin_idx, self),
             .queen  => queenMovementMask(origin_idx, self),
             .king   => kingMovementMask(origin_idx, self),
+        } catch {
+            // TODO - Switch on the error returned by prev. block
+            //        to determine what to return here
+            return ApplyMoveError.OriginUnoccupied;
         };
 
         // If we have nowhere to move to before we even begin filtering,
@@ -274,7 +278,7 @@ pub const Board = struct {
         // isn't a piece present we don't care (thus we discard the error)
         speculative.removePieceAt(to) catch {};
 
-        speculative.setPieceAt(piece_info.piece, piece_info.color, to);
+        try speculative.setPieceAt(piece_info.piece, piece_info.color, to);
 
         // Finally, check if our own king is in check
         const op_attacks = if (piece_info.color == .white) speculative.attacked_by_black
@@ -388,7 +392,6 @@ pub const Board = struct {
 
 };
 
-const PlacementError = error{ PositionOccupied };
 
 fn attackedByPawns(pawn_positions: u64, color: PieceColor) u64 {
     var attacked_squares: u64 = 0;
@@ -755,14 +758,17 @@ pub fn attackMask(color: PieceColor, board: *const Board) u64 {
     return kings | queens | rooks | bishops | knights | pawns;
 }
 
+pub const MoveCalculationError = error { PositionUnoccupied };
 
 // TODO - Account for en passant
-pub fn pawnMovementMask(position: Board.PositionIndex, board: *const Board) u64 {
+fn pawnMovementMask(position: Board.PositionIndex, board: *const Board) MoveCalculationError!u64 {
     const pos_bit: u64 = @as(u64, 1) << position;
 
     var moves: u64 = 0;
 
-    std.debug.assert((board.occupied() & pos_bit) != 0);
+    if ((board.occupied() & pos_bit) == 0) {
+        return MoveCalculationError.PositionUnoccupied;
+    }
 
     const color: PieceColor = if ((board.white & pos_bit) != 0)
         PieceColor.white
@@ -834,11 +840,13 @@ pub fn pawnMovementMask(position: Board.PositionIndex, board: *const Board) u64 
     return moves;
 }
 
-pub fn knightMovementMask(position: Board.PositionIndex, board: *const Board) u64 {
+fn knightMovementMask(position: Board.PositionIndex, board: *const Board) MoveCalculationError!u64 {
     const pos_bit: u64 = @as(u64, 1) << position;
     
     // Rather than return an error, let's just say this state is completely illegal and crash.
-    std.debug.assert((board.occupied() & pos_bit) != 0);
+    if ((board.occupied() & pos_bit) == 0) {
+        return MoveCalculationError.PositionUnoccupied;
+    }
 
     const color: PieceColor = if ((board.white & pos_bit) != 0)
         PieceColor.white
@@ -899,13 +907,15 @@ pub fn knightMovementMask(position: Board.PositionIndex, board: *const Board) u6
     return moves;
 }
 
-pub fn bishopMovementMask(position: Board.PositionIndex, board: *const Board) u64 {
+fn bishopMovementMask(position: Board.PositionIndex, board: *const Board) MoveCalculationError!u64 {
     const pos_bit: u64 = @as(u64, 1) << position;
 
     var moves: u64 = 0;
 
     // Rather than return an error, let's just say this state is completely illegal and crash.
-    std.debug.assert((board.occupied() & pos_bit) != 0);
+    if ((board.occupied() & pos_bit) == 0) {
+        return MoveCalculationError.PositionUnoccupied;
+    }
 
     const color: PieceColor = if ((board.white & pos_bit) != 0)
         PieceColor.white
@@ -1021,13 +1031,14 @@ pub fn bishopMovementMask(position: Board.PositionIndex, board: *const Board) u6
     return moves;
 }
 
-pub fn rookMovementMask(position: Board.PositionIndex, board: *const Board) u64 {
+fn rookMovementMask(position: Board.PositionIndex, board: *const Board) MoveCalculationError!u64 {
     const pos_bit: u64 = @as(u64, 1) << position;
 
     var moves: u64 = 0;
 
-    // Rather than return an error, let's just say this state is completely illegal and crash.
-    std.debug.assert((board.occupied() & pos_bit) != 0);
+    if ((board.occupied() & pos_bit) == 0) {
+        return MoveCalculationError.PositionUnoccupied;
+    }
 
     const color: PieceColor = if ((board.white & pos_bit) != 0)
         PieceColor.white
@@ -1112,18 +1123,19 @@ pub fn rookMovementMask(position: Board.PositionIndex, board: *const Board) u64 
     return moves;
 }
 
-pub fn queenMovementMask(position: u6, board: *const Board) u64 {
-    const diagonals     = bishopMovementMask(position, board);
-    const rank_and_file = rookMovementMask(position, board);
+fn queenMovementMask(position: u6, board: *const Board) MoveCalculationError!u64 {
+    const diagonals     = try bishopMovementMask(position, board);
+    const rank_and_file = try rookMovementMask(position, board);
 
     return diagonals | rank_and_file;
 }
 
-pub fn kingMovementMask(position: u6, board: *const Board) u64 {
+fn kingMovementMask(position: u6, board: *const Board) MoveCalculationError!u64 {
     const king_bitboard: u64 = @as(u64, 1) << position;
 
-    // There better be a king here.
-    std.debug.assert(board.occupied() & king_bitboard != 0);
+    if (board.occupied() & king_bitboard == 0) {
+        return MoveCalculationError.PositionUnoccupied;
+    }
 
     const is_white = (board.white & king_bitboard) != 0;
 
@@ -1167,6 +1179,8 @@ test "initializing an empty board results in all bits set to zero" {
     try std.testing.expectEqual(@as(u64, 0), b.rooks);
     try std.testing.expectEqual(@as(u64, 0), b.queens);
     try std.testing.expectEqual(@as(u64, 0), b.kings);
+    try std.testing.expectEqual(@as(u64, 0), b.attacked_by_white);
+    try std.testing.expectEqual(@as(u64, 0), b.attacked_by_black);
 }
 
 test "`occupied` produces the union of bitboards `black` and `white`" {
@@ -1197,13 +1211,13 @@ test "Pawns can move forward if they are on the board" {
     const black_pos: Board.PositionIndex = 61;
     board.black |= @as(u64, 1) << black_pos;
     board.pawns |= @as(u64, 1) << black_pos;
-    const black_moves = pawnMovementMask(black_pos, &board);
+    const black_moves = try pawnMovementMask(black_pos, &board);
     try std.testing.expectEqual(9007199254740992, black_moves);
 
     const white_pos: Board.PositionIndex = 7;
     board.white |= @as(u64, 1) << white_pos;
     board.pawns |= @as(u64, 1) << white_pos;
-    const white_moves: u64 = pawnMovementMask(white_pos, &board);
+    const white_moves: u64 = try pawnMovementMask(white_pos, &board);
     try std.testing.expectEqual(32768, white_moves);
 }
 
@@ -1218,13 +1232,13 @@ test "Pawns can move two spaces forward if they are in their starting rank" {
     const black_pos: Board.PositionIndex = 54;
     board.black |= @as(u64, 1) << black_pos;
     board.pawns |= @as(u64, 1) << black_pos;
-    const black_moves = pawnMovementMask(black_pos, &board);
+    const black_moves = try pawnMovementMask(black_pos, &board);
     try std.testing.expectEqual(70643622084608, black_moves);
 
     const white_pos: Board.PositionIndex = 11;
     board.white |= @as(u64, 1) << white_pos;
     board.pawns |= @as(u64, 1) << white_pos;
-    const white_moves: u64 = pawnMovementMask(white_pos, &board);
+    const white_moves: u64 = try pawnMovementMask(white_pos, &board);
     try std.testing.expectEqual(134742016, white_moves);
 }
 
@@ -1345,7 +1359,7 @@ test "Knights can be moved in a 2 over 1 pattern of rank & file, over other piec
     board.white   |= @as(u64, 1) << 45;
     board.rooks   |= @as(u64, 1) << 45;
 
-    const moves = knightMovementMask(pos, &board);
+    const moves = try knightMovementMask(pos, &board);
 
     try std.testing.expectEqual(11333767002587136, moves);
 }
@@ -1371,7 +1385,7 @@ test "Knights which have all destinations unreachable cannot move" {
     board.black  |= @as(u64, 1) << 22;
     board.queens |= @as(u64, 1) << 22;
 
-    const moves = knightMovementMask(pos, &board);
+    const moves = try knightMovementMask(pos, &board);
 
     try std.testing.expectEqual(0, moves);
 }
@@ -1549,7 +1563,7 @@ test "Placing piece on an empty space updates the bit-board representations" {
     try std.testing.expectEqual(0, board.black);
     try std.testing.expectEqual(0, board.queens);
 
-    board.setPieceAt(Piece.queen, PieceColor.black, pos);
+    try board.setPieceAt(Piece.queen, PieceColor.black, pos);
 
     try std.testing.expectEqual(4398046511104, board.black);
     try std.testing.expectEqual(4398046511104, board.queens);
@@ -1838,33 +1852,33 @@ test "Get attacked squares for entire team produces accurate bitboard" {
     {
         var board = Board.empty();
         // White pieces
-        board.setPieceAt(.king,   .white, .E1);
-        board.setPieceAt(.queen,  .white, .D4);
-        board.setPieceAt(.rook,   .white, .A1);
-        board.setPieceAt(.rook,   .white, .F1);
-        board.setPieceAt(.bishop, .white, .C4);
-        board.setPieceAt(.bishop, .white, .G2);
-        board.setPieceAt(.knight, .white, .F3);
-        board.setPieceAt(.pawn,   .white, .A2);
-        board.setPieceAt(.pawn,   .white, .B2);
-        board.setPieceAt(.pawn,   .white, .E4);
-        board.setPieceAt(.pawn,   .white, .F2);
-        board.setPieceAt(.pawn,   .white, .G3);
-        board.setPieceAt(.pawn,   .white, .H2);
+        try board.setPieceAt(.king,   .white, .E1);
+        try board.setPieceAt(.queen,  .white, .D4);
+        try board.setPieceAt(.rook,   .white, .A1);
+        try board.setPieceAt(.rook,   .white, .F1);
+        try board.setPieceAt(.bishop, .white, .C4);
+        try board.setPieceAt(.bishop, .white, .G2);
+        try board.setPieceAt(.knight, .white, .F3);
+        try board.setPieceAt(.pawn,   .white, .A2);
+        try board.setPieceAt(.pawn,   .white, .B2);
+        try board.setPieceAt(.pawn,   .white, .E4);
+        try board.setPieceAt(.pawn,   .white, .F2);
+        try board.setPieceAt(.pawn,   .white, .G3);
+        try board.setPieceAt(.pawn,   .white, .H2);
         
         // Black pieces for context
-        board.setPieceAt(.king,   .black, .E8);
-        board.setPieceAt(.queen,  .black, .D8);
-        board.setPieceAt(.rook,   .black, .A8);
-        board.setPieceAt(.rook,   .black, .F8);
-        board.setPieceAt(.bishop, .black, .B7);
-        board.setPieceAt(.pawn,   .black, .A7);
-        board.setPieceAt(.knight, .black, .C6);
-        board.setPieceAt(.pawn,   .black, .B6);
-        board.setPieceAt(.pawn,   .black, .E5);
-        board.setPieceAt(.pawn,   .black, .F7);
-        board.setPieceAt(.pawn,   .black, .G7);
-        board.setPieceAt(.pawn,   .black, .H7);
+        try board.setPieceAt(.king,   .black, .E8);
+        try board.setPieceAt(.queen,  .black, .D8);
+        try board.setPieceAt(.rook,   .black, .A8);
+        try board.setPieceAt(.rook,   .black, .F8);
+        try board.setPieceAt(.bishop, .black, .B7);
+        try board.setPieceAt(.pawn,   .black, .A7);
+        try board.setPieceAt(.knight, .black, .C6);
+        try board.setPieceAt(.pawn,   .black, .B6);
+        try board.setPieceAt(.pawn,   .black, .E5);
+        try board.setPieceAt(.pawn,   .black, .F7);
+        try board.setPieceAt(.pawn,   .black, .G7);
+        try board.setPieceAt(.pawn,   .black, .H7);
 
         const result = attackMask(.white, &board);
         
@@ -1963,25 +1977,57 @@ test "Applying illegal movement returns an error" {
 }
 
 test "Applying legal move which moves into check produces an error" {
-    var board = Board.empty();
+    {
+        var board = Board.empty();
 
-    // The white knight is blocking the rook's attack, which would put the king in check
-    board.setPieceAt(.king, .white, .A4);
-    board.setPieceAt(.knight, .white, .A5);
-    board.setPieceAt(.rook, .black, .A8);
+        // The white knight is blocking the rook's attack, which would put the king in check
+        try board.setPieceAt(.king, .white, .A4);
+        try board.setPieceAt(.knight, .white, .A5);
+        try board.setPieceAt(.rook, .black, .A8);
 
-    // Try to move the knight out of the rook's path, producing check
-    const result = board.applyMove(.A5, .B7);
+        // Try to move the knight out of the rook's path, producing check
+        const result = board.applyMove(.A5, .B7);
 
-    try std.testing.expectEqual(Board.ApplyMoveError.MoveIntoCheck, result);
+        try std.testing.expectEqual(Board.ApplyMoveError.MoveIntoCheck, result);
+    }
+
+    {
+        var board = Board.empty();
+
+        try board.setPieceAt(.king, .white, .F6);
+
+        try board.setPieceAt(.rook, .black, .G1);
+        try board.setPieceAt(.rook, .black, .B7);
+        try board.setPieceAt(.queen, .black, .D5);
+        try board.setPieceAt(.knight, .black, .D8);
+
+        const result = board.applyMove(.F6, .F7);
+
+        try std.testing.expectEqual(Board.ApplyMoveError.MoveIntoCheck, result);
+    }
+
+    {
+        var board = Board.empty();
+
+        try board.setPieceAt(.king, .white, .F6);
+
+        try board.setPieceAt(.rook, .black, .G1);
+        try board.setPieceAt(.rook, .black, .B7);
+        try board.setPieceAt(.queen, .black, .D5);
+        try board.setPieceAt(.knight, .black, .D8);
+
+        const result = board.applyMove(.F6, .F7);
+
+        try std.testing.expectEqual(Board.ApplyMoveError.MoveIntoCheck, result);
+    }
 }
 
 test "Applying legal move updates the board" {
     var board = Board.empty();
 
-    board.setPieceAt(.knight, .black, .C6);
-    board.setPieceAt(.rook, .white, .B4);
-    board.setPieceAt(.bishop, .white, .D1);
+    try board.setPieceAt(.knight, .black, .C6);
+    try board.setPieceAt(.rook, .white, .B4);
+    try board.setPieceAt(.bishop, .white, .D1);
 
     try board.applyMove(.C6, .B4);
 
