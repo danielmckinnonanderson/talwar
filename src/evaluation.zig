@@ -5,24 +5,8 @@ const Board = bitboards.Board;
 
 pub const Score = f32;
 
-const PawnScores = struct {
-    pub const Pawns = f32;
-
-    pub const king:   Pawns = 200.0;
-    pub const queen:  Pawns =   9.0;
-    pub const rook:   Pawns =   5.0;
-    pub const bishop: Pawns =   3.0;
-    pub const knight: Pawns =   3.0;
-    pub const pawn:   Pawns =   1.0;
-
-    // Doubled, blocked, and isolated pawns
-    pub const dbi: Pawns =   0.5;
-
-    // Number of legal moves
-    pub const mobility: Pawns =   0.1;
-};
-
 pub const Centipawns = i64;
+
 // Using Turing's valuation table, retrieved from
 // https://www.chessprogramming.org/Point_Value#Basic_values
 const CentipawnValues = struct {
@@ -32,25 +16,28 @@ const CentipawnValues = struct {
     pub const bishop =    350;
     pub const knight =    300;
     pub const pawn   =    100;
+
+    // TODO - Account for some other considerations from
+    //        https://www.chessprogramming.org/Material#Other_Material_Considerations
+    //        such as mobility (# of possible moves from position), bishop pairs,
+    //        and other "greater than sum of parts" piece combos
 };
 
-pub fn evaluate(board: *const Board) Score {
-    _ = board;
-}
-
-pub fn material(board: *const Board) Score {
-    const king_w:   i32 = @popCount(board.white & board.kings);
-    const king_b:   i32 = @popCount(board.black & board.kings);
-    const queen_w:  i32 = @popCount(board.white & board.queens);
-    const queen_b:  i32 = @popCount(board.black & board.queens);
-    const rook_w:   i32 = @popCount(board.white & board.rooks);
-    const rook_b:   i32 = @popCount(board.black & board.rooks);
-    const bishop_w: i32 = @popCount(board.white & board.bishops);
-    const bishop_b: i32 = @popCount(board.black & board.bishops);
-    const knight_w: i32 = @popCount(board.white & board.knights);
-    const knight_b: i32 = @popCount(board.black & board.knights);
-    const pawn_w:   i32 = @popCount(board.white & board.pawns);
-    const pawn_b:   i32 = @popCount(board.black & board.pawns);
+/// Compute the material imbalance of the board, where a positive result
+/// indicates that white is ahead and a negative result indicates that black is ahead.
+pub fn material(board: *const Board) Centipawns {
+    const king_w:   i64 = @popCount(board.white & board.kings);
+    const king_b:   i64 = @popCount(board.black & board.kings);
+    const queen_w:  i64 = @popCount(board.white & board.queens);
+    const queen_b:  i64 = @popCount(board.black & board.queens);
+    const rook_w:   i64 = @popCount(board.white & board.rooks);
+    const rook_b:   i64 = @popCount(board.black & board.rooks);
+    const bishop_w: i64 = @popCount(board.white & board.bishops);
+    const bishop_b: i64 = @popCount(board.black & board.bishops);
+    const knight_w: i64 = @popCount(board.white & board.knights);
+    const knight_b: i64 = @popCount(board.black & board.knights);
+    const pawn_w:   i64 = @popCount(board.white & board.pawns);
+    const pawn_b:   i64 = @popCount(board.black & board.pawns);
 
     const kings   = (king_w - king_b)     * CentipawnValues.king;
     const queens  = (queen_w - queen_b)   * CentipawnValues.queen;
@@ -63,6 +50,26 @@ pub fn material(board: *const Board) Score {
 }
 
 test "Produce a material score given a board" {
-    try std.testing.expect(false and "FIXME tomorrow!");
+    {
+        var board = Board.empty();
+
+        try board.setPieceAt(.king, .black, .E8);
+        try std.testing.expectEqual(@as(Centipawns, -10_000), material(&board));
+
+        try board.setPieceAt(.king, .white, .E1);
+
+        try std.testing.expectEqual(@as(Centipawns, 0), material(&board));
+
+        try board.setPieceAt(.bishop, .white, .H5);
+        try board.setPieceAt(.knight, .white, .B3);
+        try board.setPieceAt(.queen, .white, .A5);
+
+        try std.testing.expectEqual(@as(Centipawns, 1650), material(&board));
+
+        try board.setPieceAt(.pawn, .black, .D6);
+        try board.setPieceAt(.rook, .black, .G6);
+
+        try std.testing.expectEqual(@as(Centipawns, 1000), material(&board));
+    }
 }
 

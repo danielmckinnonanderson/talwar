@@ -474,7 +474,7 @@ pub const Uci = enum {
             /// The CPU usage of the engine is <value> permill (per-million?)
             cpuload: u64,
 
-            /// Any string <value> which will be displayed (by the UI?)
+            /// Any string <value> which will be sent to the UI for logging purposes
             string: []const u8,
 
             /// Move <value1> is refuted by the line <value2> - <value{i}>, where `i` can
