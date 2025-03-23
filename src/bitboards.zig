@@ -48,6 +48,24 @@ pub const Position = enum {
 pub const PieceInfo = struct {
     color: PieceColor,
     piece: Piece,
+
+    pub fn fromChar(char: u8) ?PieceInfo {
+        return switch (char) {
+            'p' => PieceInfo { .color = .black, .piece = .pawn },
+            'P' => PieceInfo { .color = .white, .piece = .pawn },
+            'n' => PieceInfo { .color = .black, .piece = .knight },
+            'N' => PieceInfo { .color = .white, .piece = .knigth },
+            'r' => PieceInfo { .color = .black, .piece = .rook },
+            'R' => PieceInfo { .color = .white, .piece = .rook },
+            'b' => PieceInfo { .color = .black, .piece = .bishop },
+            'B' => PieceInfo { .color = .white, .piece = .bishop },
+            'q' => PieceInfo { .color = .black, .piece = .queen },
+            'Q' => PieceInfo { .color = .white, .piece = .queen },
+            'k' => PieceInfo { .color = .black, .piece = .king },
+            'K' => PieceInfo { .color = .white, .piece = .king },
+            else => null
+        };
+    }
 };
 
 pub const Board = struct {
