@@ -12,6 +12,10 @@ pub fn main() !void {
     const stdin  = std.io.getStdIn().reader();
     const stdout = std.io.getStdOut().writer();
 
+    bitboards.Board.printBitboard(576460752303427584);
+
+    bitboards.Board.printBitboard(1730508156817113104);
+
     try logger.debug("Talwar started up", .{});
 
     // NOTE - Protocol seems to stipulate that this should only
