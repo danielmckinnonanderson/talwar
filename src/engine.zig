@@ -5,10 +5,16 @@ const Board     = bitboards.Board;
 
 pub const EngineConfig = struct {
     debug: bool,
+    opts: Opts,
+
+    pub const Opts = struct {
+        // None for now
+    };
 
     pub fn init() EngineConfig {
         return EngineConfig {
             .debug = false,
+            .opts = .{},
         };
     }
 };
@@ -32,7 +38,6 @@ pub fn handleCommand(
                 GuiCommand{ .id = .{ .name = "talwar [development]" }});
 
             // TODO - Send `option` command here for all parameters that can be changed in engine
-
             try uci.send(output_writer, .uciok);
         },
         .debug => |is_enabled| {

@@ -53,21 +53,21 @@ test "Produce a material score given a board" {
     {
         var board = Board.empty();
 
-        try board.setPieceAt(.king, .black, .E8);
+        try board.setPieceAtPosition(.king, .black, .E8);
         try std.testing.expectEqual(@as(Centipawns, -10_000), material(&board));
 
-        try board.setPieceAt(.king, .white, .E1);
+        try board.setPieceAtPosition(.king, .white, .E1);
 
         try std.testing.expectEqual(@as(Centipawns, 0), material(&board));
 
-        try board.setPieceAt(.bishop, .white, .H5);
-        try board.setPieceAt(.knight, .white, .B3);
-        try board.setPieceAt(.queen, .white, .A5);
+        try board.setPieceAtPosition(.bishop, .white, .H5);
+        try board.setPieceAtPosition(.knight, .white, .B3);
+        try board.setPieceAtPosition(.queen, .white, .A5);
 
         try std.testing.expectEqual(@as(Centipawns, 1650), material(&board));
 
-        try board.setPieceAt(.pawn, .black, .D6);
-        try board.setPieceAt(.rook, .black, .G6);
+        try board.setPieceAtPosition(.pawn, .black, .D6);
+        try board.setPieceAtPosition(.rook, .black, .G6);
 
         try std.testing.expectEqual(@as(Centipawns, 1000), material(&board));
     }
