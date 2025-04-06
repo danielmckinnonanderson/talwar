@@ -34,6 +34,25 @@ pub const Position = enum {
         };
     }
 
+    pub fn fromIndex(index: Board.PositionIndex) Position {
+        return switch (index) {
+            0 => .A1, 8 => .A2, 16 => .A3, 24 => .A4, 32 => .A5, 40 => .A6, 48 => .A7, 56 => .A8,
+            1 => .B1, 9 => .B2, 17 => .B3, 25 => .B4, 33 => .B5, 41 => .B6, 49 => .B7, 57 => .B8,
+            2 => .C1, 10 => .C2, 18 => .C3, 26 => .C4, 34 => .C5, 42 => .C6, 50 => .C7, 58 => .C8,
+            3 => .D1, 11 => .D2, 19 => .D3, 27 => .D4, 35 => .D5, 43 => .D6, 51 => .D7, 59 => .D8,
+            4 => .E1, 12 => .E2, 20 => .E3, 28 => .E4, 36 => .E5, 44 => .E6, 52 => .E7, 60 => .E8,
+            5 => .F1, 13 => .F2, 21 => .F3, 29 => .F4, 37 => .F5, 45 => .F6, 53 => .F7, 61 => .F8,
+            6 => .G1, 14 => .G2, 22 => .G3, 30 => .G4, 38 => .G5, 46 => .G6, 54 => .G7, 62 => .G8,
+            7 => .H1, 15 => .H2, 23 => .H3, 31 => .H4, 39 => .H5, 47 => .H6, 55 => .H7, 63 => .H8,
+        };
+    }
+
+    pub inline fn intoBits(position: Position) u64 {
+        var result: u64 = 0;
+        result |= @as(u64, 1) << Position.intoIndex(position);
+        return result;
+    }
+
     pub fn intoBitboard(positions: []const Position) u64 {
         var bitboard: u64 = 0;
         
@@ -68,6 +87,27 @@ pub const PieceInfo = struct {
     }
 };
 
+pub const CastleState = packed struct {
+    black_k: u1,
+    black_q: u1,
+    white_k: u1,
+    white_q: u1,
+
+    pub const ZERO = CastleState {
+        .white_k = 0,
+        .white_q = 0,
+        .black_k = 0,
+        .black_q = 0,
+    };
+
+    pub const ONE = CastleState {
+        .white_k = 1,
+        .white_q = 1,
+        .black_k = 1,
+        .black_q = 1,
+    };
+};
+
 pub const Board = struct {
     /// 8x8 board = 64 squares indexed 0 through 63.
     pub const PositionIndex = u6;
@@ -90,11 +130,11 @@ pub const Board = struct {
     pub const FILE_G: u64 = 0x4040404040404040;
     pub const FILE_H: u64 = 0x8080808080808080;
 
-    white: u64,
-    black: u64,
+    white: u64 = 0,
+    black: u64 = 0,
 
-    attacked_by_white: u64,
-    attacked_by_black: u64,
+    attacked_by_white: u64 = 0,
+    attacked_by_black: u64 = 0,
 
     pawns:   u64 = 0,
     knights: u64 = 0,
@@ -102,6 +142,13 @@ pub const Board = struct {
     rooks:   u64 = 0,
     queens:  u64 = 0,
     kings:   u64 = 0,
+
+    // Supplemental state
+    to_move: PieceColor,
+    castle: CastleState = CastleState.ZERO,
+    en_passant: u64 = 0,
+    halfmoves: u16 = 0,
+    fullmoves: u16 = 0,
 
     pub fn empty() Board {
         return Board {
@@ -115,6 +162,12 @@ pub const Board = struct {
             .rooks   = 0,
             .queens  = 0,
             .kings   = 0,
+
+            .castle  = CastleState.ZERO,
+            .to_move = .white,
+            .en_passant = 0,
+            .halfmoves = 0,
+            .fullmoves = 0,
         };
     }
 
@@ -123,17 +176,9 @@ pub const Board = struct {
             .white   = comptime Position.intoBitboard(
                         &[_]Position{ .A1, .B1, .C1, .D1, .E1, .F1, .G1, .H1,
                                       .A2, .B2, .C2, .D2, .E2, .F2, .G2, .H2 }),
-            .attacked_by_white = comptime Position.intoBitboard(
-                        &[_]Position{ .B1, .C1, .D1, .E1, .F1, .G1,
-                                      .A2, .B2, .C2, .D2, .E2, .F2, .G2, .H2,
-                                      .A3, .B3, .C3, .D3, .E3, .F3, .G3, .H3, }),
             .black   = comptime Position.intoBitboard(
                         &[_]Position{ .A7, .B7, .C7, .D7, .E7, .F7, .G7, .H7,
                                       .A8, .B8, .C8, .D8, .E8, .F8, .G8, .H8 }),
-            .attacked_by_black = comptime Position.intoBitboard(
-                        &[_]Position{ .B8, .C8, .D8, .E8, .F8, .G8,
-                                      .A7, .B7, .C7, .D7, .E7, .F7, .G7, .H7,
-                                      .A6, .B6, .C6, .D6, .E6, .F6, .G6, .H6, }),
             .pawns   = comptime Position.intoBitboard(
                         &[_]Position{ .A2, .B2, .C2, .D2, .E2, .F2, .G2, .H2,
                                       .A7, .B7, .C7, .D7, .E7, .F7, .G7, .H7 }),
@@ -142,7 +187,13 @@ pub const Board = struct {
             .rooks   = comptime Position.intoBitboard(&[_]Position{ .A1, .H1, .A8, .H8 }),
             .queens  = comptime Position.intoBitboard(&[_]Position{ .D1, .D8 }),
             .kings   = comptime Position.intoBitboard(&[_]Position{ .E1, .E8 }),
-        };
+
+            .castle  = CastleState.ONE,
+            .to_move = .white,
+            .en_passant = 0,
+            .halfmoves = 0,
+            .fullmoves = 0,
+       };
 
         board.attacked_by_white = attackMask(.white, &board);
         board.attacked_by_black = attackMask(.black, &board);
@@ -230,7 +281,7 @@ pub const Board = struct {
 
     const RemovePieceError = error { PositionUnoccupied };
 
-    pub fn removePieceAt(self: *Board, position: Position) RemovePieceError!void {
+    pub fn removePieceAt(self: *Board, position: Position) RemovePieceError!PieceInfo {
         const present = self.getPieceAt(position) catch {
             return RemovePieceError.PositionUnoccupied;
         };
@@ -254,6 +305,8 @@ pub const Board = struct {
 
         self.attacked_by_white = attackMask(.white, self);
         self.attacked_by_black = attackMask(.black, self);
+
+        return present;
     }
 
     pub const ApplyMoveError = error {
@@ -262,16 +315,18 @@ pub const Board = struct {
         MoveIntoCheck
     };
 
+    // TODO - Return the captured piece, if any
+    // TODO - Account for en passant
     // TODO - Account for castling
-    pub fn applyMove(self: *Board, from: Position, to: Position) ApplyMoveError!void {
-        const piece_info: PieceInfo = self.getPieceAt(from) catch {
+    pub fn applyMove(self: *Board, from: Position, to: Position) ApplyMoveError!?PieceInfo {
+        const moving_piece: PieceInfo = self.getPieceAt(from) catch {
             return ApplyMoveError.OriginUnoccupied;
         };
 
         const origin_idx = Position.intoIndex(from);
-        const dest_bits = Position.intoBitboard(&[1]Position{ to });
+        const dest_bits = Position.intoBits(to);
 
-        const moves = switch (piece_info.piece) {
+        const moves = switch (moving_piece.piece) {
             .pawn   => pawnMovementMask(origin_idx, self),
             .knight => knightMovementMask(origin_idx, self),
             .bishop => bishopMovementMask(origin_idx, self),
@@ -300,27 +355,71 @@ pub const Board = struct {
 
         // Remove the piece at `from` and place it at `to`.
         // We also expect `setPieceAtPosition` to recalculate the `attack_by` mask.
-        speculative.removePieceAt(from) catch unreachable;
+        _ = speculative.removePieceAt(from) catch unreachable;
 
         // If there is a piece present it will be removed, and if there
         // isn't a piece present we don't care (thus we discard the error)
-        speculative.removePieceAt(to) catch {};
+        var removed = speculative.removePieceAt(to) catch null;
 
-        try speculative.setPieceAtPosition(piece_info.piece, piece_info.color, to);
+        // Place the piece we moved at its new location.
+        try speculative.setPieceAtPosition(moving_piece.piece, moving_piece.color, to);
 
-        // Finally, check if our own king is in check
-        const op_attacks = if (piece_info.color == .white) speculative.attacked_by_black
+        // If the move was an en passant capture, then we still need to remove the pawn
+        // we captured since it wouldn't have been in the space we moved to.
+        if (dest_bits & self.en_passant != 0) {
+            // By definition, the captured pawn moved two spaces on its last turn.
+            // That means it will be one rank further (+ or - depending on color)
+            // than the en passant space.
+            const dest_idx = Position.intoIndex(to);
+            const captured_idx = if (moving_piece.color == .white) dest_idx - 8 else dest_idx + 8;
+            const captured_pos = Position.fromIndex(captured_idx);
+            // Unreachable because for there not to be a piece here would be an illegal board-state.
+            removed = speculative.removePieceAt(captured_pos) catch unreachable;
+        }
+
+        // Check if our own king is in check
+        const op_attacks = if (moving_piece.color == .white) speculative.attacked_by_black
             else speculative.attacked_by_white;
 
-        const allies = if (piece_info.color == .white) speculative.white else speculative.black;
+        const allies = if (moving_piece.color == .white) speculative.white else speculative.black;
 
         if ((allies & speculative.kings) & op_attacks != 0) {
             return ApplyMoveError.MoveIntoCheck;
         }
 
-        // Otherwise, this is a legal move that does not put us into check.
+
+        // Finally, we know this move is valid. We just need to update all of the supplemental game state.
+
+        // If move was a two-space pawn move, we need to add the correct space to the en passant bits.
+        const from_idx = Position.intoIndex(from);
+        const to_idx   = Position.intoIndex(to);
+        if (moving_piece.piece == .pawn and @abs(@as(i16, to_idx) - @as(i16, from_idx)) == 16) {
+            const en_passant_tgt_idx: Board.PositionIndex = if (moving_piece.color == .white)
+                from_idx + 8
+            else from_idx - 8;
+
+            var spec_en_passant: u64 = 0;
+            spec_en_passant |= @as(u64, 1) << en_passant_tgt_idx;
+            speculative.en_passant = spec_en_passant;
+        } else {
+            // If the move wasn't a two-space pawn move, reset the en passant target position to zero.
+            speculative.en_passant = 0;
+        }
+
+        // TODO - Update castling, en passant values when rook / king / pawn moves
+        // TODO - Update moves & half moves
+        // TODO - Promotion
+
+        // FIXME - If I'm going to alternate, it should also prevent an illegal
+        //         state (the wrong team moving, and then getting a second turn right after).
+        speculative.to_move = if (self.to_move == .white) .black else .white;
+
+        // This is a legal move that does not put us into check.
         // Persist the move by ending speculation.
         self.* = speculative;
+
+        // Return the piece that we removed, or null if the space was empty
+        return removed;
     }
 
     /// Implements the format interface for the board as whole, writing the
@@ -858,10 +957,10 @@ fn pawnMovementMask(position: Board.PositionIndex, board: *const Board) MoveCalc
     // If the space is occupied by a non-king piece of opposite color
     // it is capturable and thus a legal move
     const opposite_color = if (color == .white) board.black else board.white;
-    if (opposite_color & ~board.kings & diag_right_pos != 0) {
+    if ((opposite_color & ~board.kings & diag_right_pos != 0) or (board.en_passant & diag_right_pos != 0)) {
         moves |= diag_right_pos;
     }
-    if (opposite_color & ~board.kings & diag_left_pos != 0) {
+    if ((opposite_color & ~board.kings & diag_left_pos != 0) or (board.en_passant & diag_left_pos != 0)) {
         moves |= diag_left_pos;
     }
 
@@ -1629,6 +1728,23 @@ test "Get attacked squares for pawns produces accurate bitboard" {
     try std.testing.expectEqual(expected, result);
 }
 
+test "Pawn can capture an empty square when it was vacated by a pawn that moved two spaces (en passant)" {
+    var board = Board.empty();
+
+    try board.setPieceAtPosition(.pawn, .white, .C4);
+    try board.setPieceAtPosition(.pawn, .black, .D4);
+
+    board.en_passant = comptime Position.intoBitboard(&[_]Position{ .C3 });
+
+    const result = pawnMovementMask(comptime Position.intoIndex(.D4), &board);
+
+    // The black pawn should be able to move one space forward (D4), and should be
+    // able to capture the white pawn via en passant (C3).
+    const expected = comptime Position.intoBitboard(&[_]Position{ .C3, .D3 });
+
+    try std.testing.expectEqual(expected, result);
+}
+
 test "Get attacked squares for rooks produces accurate bitboard" {
     var board = Board.empty();
 
@@ -1973,7 +2089,11 @@ test "Removing piece at unoccupied square returns an error" {
 test "Removing piece produces updated bitboards" {
     var board = Board.init();
 
-    try board.removePieceAt(.D7);
+    const removed = try board.removePieceAt(.D7);
+
+    try std.testing.expectEqual(removed.piece, .pawn);
+    try std.testing.expectEqual(removed.color, .black);
+
     try std.testing.expectEqual(
         board.pawns & board.black,
         comptime Position.intoBitboard(&[_]Position{ .A7, .B7, .C7, .E7, .F7, .G7, .H7 }));
@@ -2057,7 +2177,10 @@ test "Applying legal move updates the board" {
     try board.setPieceAtPosition(.rook, .white, .B4);
     try board.setPieceAtPosition(.bishop, .white, .D1);
 
-    try board.applyMove(.C6, .B4);
+    const removed = try board.applyMove(.C6, .B4);
+
+    try std.testing.expectEqual(removed.?.color, .white);
+    try std.testing.expectEqual(removed.?.piece, .rook);
 
     const expected_bishops = Position.intoBitboard(&[_]Position{ .D1 });
     const expected_rooks   = 0;
@@ -2070,5 +2193,42 @@ test "Applying legal move updates the board" {
     try std.testing.expectEqual(expected_knights, board.knights);
     try std.testing.expectEqual(expected_w_atk,   board.attacked_by_white);
     try std.testing.expectEqual(expected_b_atk,   board.attacked_by_black);
+}
+
+test "Applying an en passant capture updates the board" {
+    var board = Board.empty();
+
+    try board.setPieceAtPosition(.pawn, .white, .B4);
+    try board.setPieceAtPosition(.pawn, .black, .C4);
+    board.en_passant = comptime Position.intoBitboard(&[_]Position{ .B3 });
+
+    const removed = try board.applyMove(.C4, .B3);
+
+    const expected_white = 0;
+    const expected_black = Position.intoBitboard(&[_]Position{ .B3 });
+    const expected_pawns = Position.intoBitboard(&[_]Position{ .B3 });
+    const expected_w_atk = 0;
+    const expected_b_atk = Position.intoBitboard(&[_]Position{ .A2, .C2 });
+
+    try std.testing.expectEqual(PieceInfo { .color =  .white, .piece = .pawn }, removed);
+    try std.testing.expectEqual(expected_white, board.white);
+    try std.testing.expectEqual(expected_black, board.black);
+    try std.testing.expectEqual(expected_pawns, board.pawns);
+    try std.testing.expectEqual(expected_w_atk, board.attacked_by_white);
+    try std.testing.expectEqual(expected_b_atk, board.attacked_by_black);
+}
+
+test "Applying a two-space pawn move adds an en passant target to the board" {
+    var board = Board.init();
+
+    try std.testing.expectEqual(0, board.en_passant);
+
+    const captured = try board.applyMove(.C2, .C4);
+    try std.testing.expectEqual(null, captured);
+    try std.testing.expectEqual(comptime Position.intoBits(.C3), board.en_passant);
+
+    // Now, make a non en passant move and expect it to be reset to zero
+    _ = try board.applyMove(.G7, .G6);
+    try std.testing.expectEqual(0, board.en_passant);
 }
 
